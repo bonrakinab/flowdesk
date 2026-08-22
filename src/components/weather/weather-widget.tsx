@@ -190,13 +190,25 @@ export function WeatherWidget({ className }: { className?: string }) {
 
   const Icon = data ? ICONS[data.icon] || Cloud : Cloud;
   
-  const displayIcon = data?.icon === "sun" && !data?.isDay 
+  const displayIcon = data?.icon === "sun" && data?.isDay === false
     ? "moon" 
-    : data?.icon === "cloud-sun" && !data?.isDay
+    : data?.icon === "cloud-sun" && data?.isDay === false
     ? "cloud-moon"
     : data?.icon || "cloud";
   
   const IconComponent = data ? ICONS[displayIcon] || Cloud : Cloud;
+  
+  // Debug: Log the weather state
+  useEffect(() => {
+    if (data) {
+      console.log('Weather Debug:', {
+        icon: data.icon,
+        isDay: data.isDay,
+        displayIcon,
+        time: data.updatedAt,
+      });
+    }
+  }, [data, displayIcon]);
   const advice = data
     ? getWeatherAdvice({
         icon: data.icon,
