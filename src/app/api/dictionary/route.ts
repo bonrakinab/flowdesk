@@ -5,8 +5,9 @@ export const dynamic = "force-dynamic";
 
 type DictMeaning = {
   partOfSpeech: string;
-  definitions: { definition: string; example?: string }[];
+  definitions: { definition: string; example?: string; source?: string }[];
   synonyms: string[];
+  source?: string;
 };
 
 type DictResult = {
@@ -14,6 +15,7 @@ type DictResult = {
   phonetic: string | null;
   lang: "en" | "bn";
   meanings: DictMeaning[];
+  sources?: string[];
   /** Bangla glosses / translations (when lang=bn or bilingual) */
   bangla?: { text: string; partOfSpeech?: string }[];
   englishGloss?: string | null;
@@ -88,8 +90,64 @@ async function fetchEnglishDict(word: string) {
       }>;
       synonyms?: string[];
     }>;
+    sourceUrls?: string[];
   }>;
   return raw[0] || null;
+}
+
+async function fetchMerriamWebster(word: string) {
+  const apiKey = process.env.MERRIAM_WEBSTER_API_KEY;
+  if (!apiKey) return null;
+  
+  try {
+    const res = await fetchWithTimeout(
+      `https://www.dictionaryapi.com/api/v3/references/collegiate/json/${encodeURIComponent(word)}?key=${apiKey}`,
+      10_000
+    );
+    if (res.status === 404) return null;
+    if (!res.ok) return null;
+    
+    const raw = (await res.json()) as Array<{
+      meta?: { id?: string };
+      hwi?: { hw?: string; prs?: Array<{ mw?: string }> };
+      fl?: string;
+      shortdef?: string[];
+      def?: Array<{
+        sseq?: Array<Array<Array<string | { dt?: Array<[string, string]> }>>>;
+      }>;
+    }>;
+    
+    if (!raw || raw.length === 0 || typeof raw[0] === 'string') return null;
+    
+    return raw;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchWordnik(word: string) {
+  const apiKey = process.env.WORDNIK_API_KEY;
+  if (!apiKey) return null;
+  
+  try {
+    const res = await fetchWithTimeout(
+      `https://api.wordnik.com/v4/word.json/${encodeURIComponent(word)}/definitions?limit=10&includeRelated=false&useCanonical=true&includeTags=false&api_key=${apiKey}`,
+      10_000
+    );
+    if (res.status === 404) return null;
+    if (!res.ok) return null;
+    
+    const raw = (await res.json()) as Array<{
+      word?: string;
+      partOfSpeech?: string;
+      text?: string;
+      attributionText?: string;
+    }>;
+    
+    return raw && raw.length > 0 ? raw : null;
+  } catch {
+    return null;
+  }
 }
 
 async function fetchBanglaBundle(word: string) {
@@ -111,7 +169,7 @@ async function fetchBanglaBundle(word: string) {
   };
 }
 
-function toEnMeanings(entry: NonNullable<Awaited<ReturnType<typeof fetchEnglishDict>>>) {
+function toEnMeanings(entry: NonNullable<Awaited<ReturnType<typeof fetchEnglishDict>>>, source = "Free Dictionary") {
   return (entry.meanings || []).map((m) => {
     const fromDefs = (m.definitions || []).flatMap((d) => d.synonyms || []);
     const syns = [...new Set([...(m.synonyms || []), ...fromDefs])].slice(0, 16);
@@ -122,11 +180,114 @@ function toEnMeanings(entry: NonNullable<Awaited<ReturnType<typeof fetchEnglishD
         .map((d) => ({
           definition: d.definition || "",
           example: d.example,
+          source,
         }))
         .filter((d) => d.definition),
       synonyms: syns,
+      source,
     };
   });
+}
+
+function parseMerriamWebster(entries: NonNullable<Awaited<ReturnType<typeof fetchMerriamWebster>>>) {
+  const meanings: DictMeaning[] = [];
+  
+  for (const entry of entries.slice(0, 3)) {
+    if (!entry.fl) continue;
+    
+    const definitions: { definition: string; example?: string; source?: string }[] = [];
+    
+    if (entry.shortdef) {
+      definitions.push(
+        ...entry.shortdef.slice(0, 3).map((def) => ({
+          definition: def,
+          source: "Merriam-Webster",
+        }))
+      );
+    }
+    
+    if (definitions.length > 0) {
+      meanings.push({
+        partOfSpeech: entry.fl,
+        definitions,
+        synonyms: [],
+        source: "Merriam-Webster",
+      });
+    }
+  }
+  
+  return meanings;
+}
+
+function parseWordnik(entries: NonNullable<Awaited<ReturnType<typeof fetchWordnik>>>) {
+  const grouped = new Map<string, typeof entries>();
+  
+  for (const entry of entries) {
+    const pos = entry.partOfSpeech || "—";
+    if (!grouped.has(pos)) grouped.set(pos, []);
+    grouped.get(pos)!.push(entry);
+  }
+  
+  const meanings: DictMeaning[] = [];
+  
+  for (const [pos, defs] of grouped.entries()) {
+    meanings.push({
+      partOfSpeech: pos,
+      definitions: defs.slice(0, 3).map((d) => ({
+        definition: d.text || "",
+        source: d.attributionText || "Wordnik",
+      })),
+      synonyms: [],
+      source: "Wordnik",
+    });
+  }
+  
+  return meanings;
+}
+
+function mergeMeanings(meaningsList: DictMeaning[][]) {
+  const merged: DictMeaning[] = [];
+  const posMap = new Map<string, DictMeaning>();
+  
+  for (const meanings of meaningsList) {
+    for (const meaning of meanings) {
+      const pos = meaning.partOfSpeech;
+      
+      if (!posMap.has(pos)) {
+        posMap.set(pos, {
+          partOfSpeech: pos,
+          definitions: [],
+          synonyms: [],
+        });
+      }
+      
+      const existing = posMap.get(pos)!;
+      
+      for (const def of meaning.definitions) {
+        const isDuplicate = existing.definitions.some(
+          (d) => d.definition.toLowerCase() === def.definition.toLowerCase()
+        );
+        if (!isDuplicate) {
+          existing.definitions.push(def);
+        }
+      }
+      
+      for (const syn of meaning.synonyms) {
+        if (!existing.synonyms.includes(syn)) {
+          existing.synonyms.push(syn);
+        }
+      }
+    }
+  }
+  
+  merged.push(...posMap.values());
+  
+  for (const meaning of merged) {
+    meaning.definitions = meaning.definitions.slice(0, 8);
+    meaning.synonyms = meaning.synonyms.slice(0, 16);
+  }
+  
+  return merged;
 }
 
 export async function GET(req: Request) {
@@ -159,22 +320,56 @@ export async function GET(req: Request) {
 
   try {
     if (lang === "en" && !isBanglaScript) {
-      const entry = await fetchEnglishDict(qEn);
-      if (!entry) {
+      const [entry, mwEntries, wordnikEntries] = await Promise.all([
+        fetchEnglishDict(qEn),
+        fetchMerriamWebster(qEn).catch(() => null),
+        fetchWordnik(qEn).catch(() => null),
+      ]);
+      
+      const allMeanings: DictMeaning[][] = [];
+      const sources: string[] = [];
+      
+      if (entry) {
+        allMeanings.push(toEnMeanings(entry, "Free Dictionary"));
+        sources.push("Free Dictionary");
+      }
+      
+      if (mwEntries) {
+        const mwMeanings = parseMerriamWebster(mwEntries);
+        if (mwMeanings.length > 0) {
+          allMeanings.push(mwMeanings);
+          sources.push("Merriam-Webster");
+        }
+      }
+      
+      if (wordnikEntries) {
+        const wordnikMeanings = parseWordnik(wordnikEntries);
+        if (wordnikMeanings.length > 0) {
+          allMeanings.push(wordnikMeanings);
+          sources.push("Wordnik");
+        }
+      }
+      
+      if (allMeanings.length === 0) {
         return NextResponse.json(
           { error: "No entry found", word: qEn },
           { status: 404 }
         );
       }
+      
+      const meanings = mergeMeanings(allMeanings);
+      
       const phonetic =
-        entry.phonetic ||
-        entry.phonetics?.find((p) => p.text)?.text ||
+        entry?.phonetic ||
+        entry?.phonetics?.find((p) => p.text)?.text ||
         null;
+        
       const payload: DictResult = {
-        word: entry.word || qEn,
+        word: entry?.word || qEn,
         phonetic,
         lang: "en",
-        meanings: toEnMeanings(entry),
+        meanings,
+        sources: sources.length > 1 ? sources : undefined,
       };
       return NextResponse.json(payload, {
         headers: {

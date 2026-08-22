@@ -10,9 +10,11 @@ type DictResult = {
   lang: "en" | "bn";
   meanings: {
     partOfSpeech: string;
-    definitions: { definition: string; example?: string }[];
+    definitions: { definition: string; example?: string; source?: string }[];
     synonyms: string[];
+    source?: string;
   }[];
+  sources?: string[];
   bangla?: { text: string; partOfSpeech?: string }[];
   englishGloss?: string | null;
 };
@@ -206,6 +208,11 @@ export function PoemDictionary({
                   {result.phonetic}
                 </div>
               )}
+              {result.sources && result.sources.length > 1 && (
+                <div className="mt-1 text-[10px] text-stone-500">
+                  Sources: {result.sources.join(", ")}
+                </div>
+              )}
             </div>
 
             {result.bangla && result.bangla.length > 0 && (
@@ -243,6 +250,11 @@ export function PoemDictionary({
                   {m.definitions.map((d, j) => (
                     <li key={j} className="leading-relaxed">
                       {d.definition}
+                      {d.source && (
+                        <span className="ml-1.5 text-[10px] text-stone-500">
+                          [{d.source}]
+                        </span>
+                      )}
                       {d.example && (
                         <div className="mt-0.5 text-xs italic text-stone-600">
                           “{d.example}”
