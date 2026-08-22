@@ -55,7 +55,7 @@ async function translateGtx(
 ): Promise<string | null> {
   try {
     const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sl}&tl=${tl}&dt=t&q=${encodeURIComponent(text)}`;
-    const res = await fetchWithTimeout(url, 5_000);
+    const res = await fetchWithTimeout(url, 8_000);
     if (!res.ok) return null;
     const data = (await res.json()) as unknown;
     // [[[translated, original, ...]]]
@@ -71,7 +71,7 @@ async function translateGtx(
 async function fetchEnglishDict(word: string) {
   const res = await fetchWithTimeout(
     `https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(word)}`,
-    6_000
+    10_000
   );
   if (res.status === 404) return null;
   if (!res.ok) throw new Error("en_unavailable");
@@ -95,7 +95,7 @@ async function fetchEnglishDict(word: string) {
 async function fetchBanglaBundle(word: string) {
   const res = await fetchWithTimeout(
     `https://dictionary.zone.id/api.php?word=${encodeURIComponent(word)}`,
-    7_000
+    10_000
   );
   if (!res.ok) return null;
   return (await res.json()) as {
@@ -280,7 +280,11 @@ export async function GET(req: Request) {
         "Cache-Control": "private, s-maxage=86400, stale-while-revalidate=604800",
       },
     });
-  } catch {
-    return NextResponse.json({ error: "Dictionary lookup failed" }, { status: 500 });
+  } catch (err) {
+    console.error("Dictionary lookup error:", err);
+    return NextResponse.json(
+      { error: "Dictionary lookup failed. Please check your connection and try again." },
+      { status: 500 }
+    );
   }
 }
