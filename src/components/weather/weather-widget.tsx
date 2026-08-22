@@ -50,6 +50,19 @@ const CACHE_KEY = "flowdesk-weather-cache";
 const WEATHER_FRESH_MS = 10 * 60_000;
 const COORDS_FRESH_MS = 30 * 60_000;
 
+function isCacheStale(cache: WeatherCache): boolean {
+  // Cache is stale if isDay state might have changed (6+ hours old)
+  const age = Date.now() - cache.fetchedAt;
+  if (age > 6 * 60 * 60_000) return true;
+  
+  // Also invalidate if we're near sunrise/sunset (±1 hour)
+  const hour = new Date().getHours();
+  const isSunriseSunsetTime = (hour >= 5 && hour <= 7) || (hour >= 17 && hour <= 19);
+  if (isSunriseSunsetTime && age > 30 * 60_000) return true;
+  
+  return false;
+}
+
 const ICONS: Record<string, typeof Sun> = {
   sun: Sun,
   moon: Moon,
@@ -132,18 +145,23 @@ export function WeatherWidget({ className }: { className?: string }) {
       setError("");
 
       const cached = readCache();
-      if (!forceRefresh && cached?.data && !data) {
+      
+      // Invalidate cache if it's stale due to potential day/night change
+      const cacheIsStale = cached ? isCacheStale(cached) : false;
+      
+      if (!forceRefresh && cached?.data && !data && !cacheIsStale) {
         setData(cached.data);
         setLoading(false);
       }
 
       const coordsFresh =
         cached &&
+        !cacheIsStale &&
         Date.now() - cached.fetchedAt < COORDS_FRESH_MS &&
         Number.isFinite(cached.lat) &&
         Number.isFinite(cached.lon);
 
-      if (!forceRefresh && coordsFresh) {
+      if (!forceRefresh && coordsFresh && !cacheIsStale) {
         const weatherFresh = Date.now() - cached!.fetchedAt < WEATHER_FRESH_MS;
         if (weatherFresh && cached!.data) {
           setData(cached!.data);
@@ -165,7 +183,7 @@ export function WeatherWidget({ className }: { className?: string }) {
 
       const result = await getDeviceLocation({ forceRefresh });
       if (!result.ok) {
-        if (cached?.data) {
+        if (cached?.data && !cacheIsStale) {
           setData(cached.data);
           setError("");
         } else {
