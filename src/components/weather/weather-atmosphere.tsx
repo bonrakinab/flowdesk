@@ -106,6 +106,29 @@ function SnowLayer({ count }: { count: number }) {
   );
 }
 
+function MoonScene({ withClouds }: { withClouds?: boolean }) {
+  return (
+    <>
+      <div className="absolute -right-1 -top-3 h-32 w-32">
+        <div className="absolute left-1/2 top-1/2 h-16 w-16 -translate-x-1/2 -translate-y-1/2 rounded-full bg-gradient-to-br from-slate-200 via-slate-100 to-slate-300 shadow-[0_0_28px_rgba(148,163,184,0.6)] ring-4 ring-slate-300/30 dark:from-slate-400 dark:via-slate-300 dark:to-slate-500 dark:shadow-[0_0_36px_rgba(203,213,225,0.5)] dark:ring-slate-400/25" />
+        <div className="absolute left-1/2 top-1/2 h-14 w-14 -translate-x-1/4 -translate-y-1/2 rounded-full bg-gradient-to-br from-indigo-950/20 to-slate-800/30 dark:from-slate-900/30 dark:to-indigo-950/20" />
+      </div>
+      {withClouds ? (
+        <CloudLayer
+          count={4}
+          speedMin={32}
+          speedMax={48}
+          topMin={48}
+          topMax={74}
+          sizeMin={52}
+          sizeMax={95}
+          opacity={0.9}
+        />
+      ) : null}
+    </>
+  );
+}
+
 function SunScene({ withClouds }: { withClouds?: boolean }) {
   return (
     <>
@@ -185,8 +208,12 @@ function StormScene() {
 
 const SKY: Record<string, string> = {
   sun: "from-sky-400/70 via-sky-200/50 to-amber-100/40 dark:from-indigo-950/40 dark:via-transparent dark:to-slate-900/20",
+  moon: "from-indigo-900/50 via-slate-700/30 to-slate-800/20 dark:from-indigo-950/50 dark:via-transparent dark:to-slate-900/25",
+  "moon-star": "from-indigo-900/50 via-slate-700/30 to-slate-800/20 dark:from-indigo-950/50 dark:via-transparent dark:to-slate-900/25",
   "cloud-sun":
     "from-sky-400/55 via-sky-200/35 to-slate-200/40 dark:from-sky-900/30 dark:via-transparent dark:to-slate-700/25",
+  "cloud-moon":
+    "from-indigo-800/45 via-slate-600/30 to-slate-700/25 dark:from-indigo-950/45 dark:via-transparent dark:to-slate-800/20",
   cloud:
     "from-slate-400/55 via-slate-300/40 to-sky-200/35 dark:from-slate-600/40 dark:via-transparent dark:to-slate-800/30",
   "cloud-fog":
@@ -201,10 +228,7 @@ const SKY: Record<string, string> = {
 };
 
 export function WeatherAtmosphere({ icon, isDay = true, className }: Props) {
-  const sky =
-    icon === "sun" && !isDay
-      ? "from-indigo-900/50 via-slate-700/30 to-slate-800/20 dark:from-indigo-950/50 dark:via-transparent dark:to-slate-900/25"
-      : SKY[icon] || SKY.cloud;
+  const sky = SKY[icon] || SKY.cloud;
 
   return (
     <div
@@ -217,7 +241,9 @@ export function WeatherAtmosphere({ icon, isDay = true, className }: Props) {
       <div className={cn("absolute inset-0 bg-gradient-to-br transition-colors duration-700", sky)} />
 
       {icon === "sun" ? <SunScene /> : null}
+      {icon === "moon" || icon === "moon-star" ? <MoonScene /> : null}
       {icon === "cloud-sun" ? <SunScene withClouds /> : null}
+      {icon === "cloud-moon" ? <MoonScene withClouds /> : null}
       {icon === "cloud" ? (
         <CloudLayer
           count={7}

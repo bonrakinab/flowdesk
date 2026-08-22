@@ -11,6 +11,8 @@ import {
   CloudSun,
   Droplets,
   MapPin,
+  Moon,
+  MoonStar,
   RefreshCw,
   Snowflake,
   Sun,
@@ -50,7 +52,10 @@ const COORDS_FRESH_MS = 30 * 60_000;
 
 const ICONS: Record<string, typeof Sun> = {
   sun: Sun,
+  moon: Moon,
+  "moon-star": MoonStar,
   "cloud-sun": CloudSun,
+  "cloud-moon": Cloud,
   cloud: Cloud,
   "cloud-fog": CloudFog,
   "cloud-drizzle": CloudDrizzle,
@@ -184,6 +189,14 @@ export function WeatherWidget({ className }: { className?: string }) {
   }, []);
 
   const Icon = data ? ICONS[data.icon] || Cloud : Cloud;
+  
+  const displayIcon = data?.icon === "sun" && !data?.isDay 
+    ? "moon" 
+    : data?.icon === "cloud-sun" && !data?.isDay
+    ? "cloud-moon"
+    : data?.icon || "cloud";
+  
+  const IconComponent = data ? ICONS[displayIcon] || Cloud : Cloud;
   const advice = data
     ? getWeatherAdvice({
         icon: data.icon,
@@ -204,7 +217,7 @@ export function WeatherWidget({ className }: { className?: string }) {
       )}
     >
       {data ? (
-        <WeatherAtmosphere icon={data.icon} isDay={data.isDay} />
+        <WeatherAtmosphere icon={displayIcon} isDay={data.isDay} />
       ) : (
         <div
           aria-hidden
@@ -283,7 +296,7 @@ export function WeatherWidget({ className }: { className?: string }) {
               <div className="flex items-end justify-between gap-3">
                 <div className="flex items-center gap-3">
                   <div className="grid h-12 w-12 place-items-center rounded-2xl bg-white/80 text-sky-600 shadow-sm backdrop-blur-sm dark:bg-white/10 dark:text-sky-300">
-                    <Icon size={24} />
+                    <IconComponent size={24} />
                   </div>
                   <div>
                     <div className="font-[family-name:var(--font-display)] text-3xl leading-none tracking-tight">
