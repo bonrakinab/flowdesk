@@ -1,0 +1,540 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  // Neon pooled URL for queries; unpooled for migrations (set both on Vercel)
+  directUrl = env("DATABASE_URL_UNPOOLED")
+}
+
+model Household {
+  id         String   @id @default(cuid())
+  name       String
+  inviteCode String   @unique
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  users    User[]
+  projects Project[]
+  contacts Contact[]
+  tickets  Ticket[]
+  calendars Calendar[]
+  events   CalendarEvent[]
+  notes    Note[]
+  folders  NoteFolder[]
+  tags     Tag[]
+  financeEntries FinanceEntry[]
+  savingsGoals   SavingsGoal[]
+  financeMonths  FinanceMonth[]
+  financeBudgets FinanceBudget[]
+  templates      Template[]
+  medications    Medication[]
+  reminders      Reminder[]
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  passwordHash  String?
+  color         String    @default("#0d9488")
+  householdId   String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  household        Household?        @relation(fields: [householdId], references: [id], onDelete: SetNull)
+  accounts         Account[]
+  sessions         Session[]
+  assignedTickets  Ticket[]          @relation("TicketAssignee")
+  createdTickets   Ticket[]          @relation("TicketCreator")
+  activities       Activity[]
+  pomodoros        PomodoroSession[]
+  notesEdited      Note[]            @relation("NoteEditor")
+  financeEntries   FinanceEntry[]
+  savingsGoals     SavingsGoal[]
+  financeMonths    FinanceMonth[]
+  financeBudgets   FinanceBudget[]
+  ticketAssignees  TicketAssignee[]
+  pushSubs         PushSubscription[]
+  templates        Template[]
+  medications      Medication[]
+  medDoseLogs      MedDoseLog[]
+  alertDeliveries  AlertDelivery[]
+  poems            Poem[]
+  /** Email alerts for due reminders/tickets/events/meds when SMTP is set */
+  alertEmail       Boolean  @default(false)
+  /** SMS alerts when Twilio is configured */
+  alertSms         Boolean  @default(false)
+  /** E.164 phone for SMS alerts, e.g. +15551234567 */
+  phone            String?
+  /** Last known Date#getTimezoneOffset() from the client (med dose alerts) */
+  tzOffsetMinutes  Int?
+  focusTicketIds   String?
+  reminders        Reminder[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model Project {
+  id          String   @id @default(cuid())
+  name        String
+  color       String   @default("#d97706")
+  status      String   @default("active")
+  description String?
+  householdId String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  household Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  tickets   Ticket[]
+}
+
+model Contact {
+  id          String   @id @default(cuid())
+  name        String
+  email       String?
+  company     String?
+  phone       String?
+  notes       String?
+  householdId String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  household Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  tickets   Ticket[]
+}
+
+model Ticket {
+  id            String    @id @default(cuid())
+  title         String
+  description   String?
+  type          String    @default("task")
+  status        String    @default("Backlog")
+  priority      String    @default("P2")
+  energy        String?
+  estimateMin   Int?
+  dueAt         DateTime?
+  waitingOn     String?
+  isInbox       Boolean   @default(false)
+  isFocus       Boolean   @default(false)
+  workStartedAt DateTime?
+  /// Recurring chore: create next instance N days after due/completion
+  recurEveryDays Int?
+  recurUntil    DateTime?
+  parentTicketId String?
+  /// Google Tasks (or other) external id
+  externalId     String?
+  externalSource String?
+  householdId   String
+  projectId     String?
+  contactId     String?
+  assigneeId    String?
+  createdById   String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  household  Household         @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  project    Project?          @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  contact    Contact?          @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  assignee   User?             @relation("TicketAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  createdBy  User?             @relation("TicketCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  checklist  ChecklistItem[]
+  reminders  Reminder[]
+  activities Activity[]
+  tags       TicketTag[]
+  assignees  TicketAssignee[]
+  pomodoros  PomodoroSession[]
+
+  @@unique([householdId, externalSource, externalId])
+  @@index([householdId, dueAt])
+}
+
+model TicketAssignee {
+  ticketId String
+  userId   String
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([ticketId, userId])
+}
+
+model ChecklistItem {
+  id        String   @id @default(cuid())
+  title     String
+  done      Boolean  @default(false)
+  ticketId  String
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+}
+
+model Tag {
+  id          String @id @default(cuid())
+  name        String
+  color       String @default("#64748b")
+  householdId String
+
+  household Household   @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  tickets   TicketTag[]
+
+  @@unique([householdId, name])
+}
+
+model TicketTag {
+  ticketId String
+  tagId    String
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  tag    Tag    @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([ticketId, tagId])
+}
+
+model Calendar {
+  id             String   @id @default(cuid())
+  name           String
+  color          String?
+  description    String?
+  externalId     String?
+  externalSource String?
+  syncEnabled    Boolean  @default(true)
+  householdId    String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  household Household       @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  events    CalendarEvent[]
+
+  @@unique([householdId, externalSource, externalId])
+  @@index([householdId])
+}
+
+model CalendarEvent {
+  id             String   @id @default(cuid())
+  title          String
+  description    String?
+  startAt        DateTime
+  endAt          DateTime
+  allDay         Boolean  @default(false)
+  type           String   @default("meeting")
+  /// P0 urgent · P1 high · P2 normal · P3 low
+  priority       String   @default("P2")
+  /// scheduled | done | postponed
+  status         String   @default("scheduled")
+  color          String?
+  assigneeId     String?
+  externalId     String?
+  externalSource String?
+  calendarId     String?
+  organizerName  String?
+  organizerEmail String?
+  createdByName  String?
+  householdId    String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  household Household  @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  calendar  Calendar?  @relation(fields: [calendarId], references: [id], onDelete: SetNull)
+  reminders Reminder[]
+
+  @@index([householdId, externalId])
+  @@index([calendarId, externalId])
+}
+
+model Reminder {
+  id          String    @id @default(cuid())
+  title       String?
+  remindAt    DateTime
+  channel     String    @default("in_app")
+  done        Boolean   @default(false)
+  ticketId    String?
+  eventId     String?
+  /** Owner for standalone reminders (no ticket/event) */
+  userId      String?
+  /** Household scope for standalone reminders */
+  householdId String?
+  createdAt   DateTime  @default(now())
+
+  ticket    Ticket?        @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  event     CalendarEvent? @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user      User?          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  household Household?     @relation(fields: [householdId], references: [id], onDelete: Cascade)
+
+  @@index([householdId, remindAt])
+  @@index([userId, remindAt])
+}
+
+model Activity {
+  id        String   @id @default(cuid())
+  message   String
+  ticketId  String
+  userId    String?
+  createdAt DateTime @default(now())
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  user   User?  @relation(fields: [userId], references: [id], onDelete: SetNull)
+}
+
+model NoteFolder {
+  id          String   @id @default(cuid())
+  name        String
+  householdId String
+  createdAt   DateTime @default(now())
+
+  household Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  notes     Note[]
+
+  @@unique([householdId, name])
+}
+
+model Note {
+  id             String   @id @default(cuid())
+  title          String   @default("Untitled")
+  content        String   @default("{\"type\":\"doc\",\"content\":[{\"type\":\"paragraph\"}]}")
+  mood           String?
+  pinned         Boolean  @default(false)
+  householdId    String
+  folderId       String?
+  lastEditedById String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  household    Household  @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  folder       NoteFolder? @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  lastEditedBy User?      @relation("NoteEditor", fields: [lastEditedById], references: [id], onDelete: SetNull)
+}
+
+model Poem {
+  id         String   @id @default(cuid())
+  title      String   @default("Untitled")
+  body       String   @default("")
+  notes      String?
+  mood       String?
+  source     String?
+  /** PNG data URL from the doodle canvas (optional) */
+  doodleData String?
+  userId     String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, updatedAt])
+}
+
+model PomodoroSession {
+  id           String    @id @default(cuid())
+  workMinutes  Int       @default(25)
+  breakMinutes Int       @default(5)
+  status       String    @default("idle")
+  phase        String    @default("work")
+  startedAt    DateTime?
+  endedAt      DateTime?
+  completed    Boolean   @default(false)
+  userId       String
+  ticketId     String?
+  createdAt    DateTime  @default(now())
+
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ticket Ticket? @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+}
+
+/// Income or expense line (BDT)
+model FinanceEntry {
+  id          String   @id @default(cuid())
+  kind        String // income | expense
+  title       String
+  amount      Float
+  category    String   @default("general")
+  scope       String   @default("personal") // personal | family
+  occurredAt  DateTime @default(now())
+  note        String?
+  recurring   Boolean  @default(false)
+  householdId String
+  userId      String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  household Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model SavingsGoal {
+  id          String   @id @default(cuid())
+  title       String
+  targetAmount Float
+  currentAmount Float  @default(0)
+  scope       String   @default("personal") // personal | family
+  deadline    DateTime?
+  note        String?
+  householdId String
+  userId      String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  household Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+/// Saved monthly finance snapshot (gross = before tax, net = after tax)
+model FinanceMonth {
+  id          String   @id @default(cuid())
+  /// YYYY-MM
+  yearMonth   String
+  scope       String   @default("personal") // personal | family
+  /// Income before tax for the month
+  grossPay    Float    @default(0)
+  /// Tax attributed to this month
+  tax         Float    @default(0)
+  /// Income after tax
+  netPay      Float    @default(0)
+  income      Float    @default(0)
+  expense     Float    @default(0)
+  saved       Float    @default(0)
+  taxCategory String   @default("general")
+  note        String?
+  householdId String
+  userId      String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  household Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([householdId, userId, yearMonth, scope])
+}
+
+/// Monthly spending cap per category
+model FinanceBudget {
+  id          String   @id @default(cuid())
+  category    String
+  limitAmount Float
+  scope       String   @default("personal") // personal | family
+  householdId String
+  userId      String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  household Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([householdId, userId, category, scope])
+}
+
+/// Shopping / meal / chore templates
+model Template {
+  id          String   @id @default(cuid())
+  kind        String // shopping | meal | chore
+  title       String
+  /// JSON array of checklist strings or meal steps
+  itemsJson   String   @default("[]")
+  note        String?
+  householdId String
+  userId      String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  household Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model PushSubscription {
+  id        String   @id @default(cuid())
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  userId    String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+/// Dedupes push/email so the same alert isn't sent twice
+model AlertDelivery {
+  id        String   @id @default(cuid())
+  userId    String
+  alertKey  String
+  channel   String // push | email
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, alertKey, channel])
+  @@index([createdAt])
+}
+
+model Medication {
+  id          String   @id @default(cuid())
+  name        String
+  dosage      String?
+  note        String?
+  color       String   @default("#0d9488")
+  active      Boolean  @default(true)
+  /// JSON array of "HH:mm" times, e.g. ["08:00","20:00"]
+  timesJson   String   @default("[]")
+  /// Minutes before dose time to fire reminder-style alerts (0 = only at dose time)
+  remindMinutesBefore Int @default(15)
+  householdId String
+  userId      String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  household Household    @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  doseLogs  MedDoseLog[]
+}
+
+model MedDoseLog {
+  id            String    @id @default(cuid())
+  medicationId  String
+  /// Date+time the dose was scheduled for
+  scheduledFor  DateTime
+  takenAt       DateTime?
+  skipped       Boolean   @default(false)
+  userId        String
+  createdAt     DateTime  @default(now())
+
+  medication Medication @relation(fields: [medicationId], references: [id], onDelete: Cascade)
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([medicationId, scheduledFor])
+}

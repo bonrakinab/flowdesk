@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "CalendarEvent" ADD COLUMN IF NOT EXISTS "priority" TEXT NOT NULL DEFAULT 'P2';

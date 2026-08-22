@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Flowdesk</string>
+    <string name="title_activity_main">Flowdesk</string>
+    <string name="package_name">app.flowdesk.family</string>
+    <string name="custom_url_scheme">app.flowdesk.family</string>
+</resources>
