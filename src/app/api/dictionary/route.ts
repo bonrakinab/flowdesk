@@ -21,14 +21,111 @@ type DictResult = {
 
 const BN_SCRIPT = /[\u0980-\u09FF]/;
 
-async function fetchWithTimeout(url: string, ms: number) {
+async function fetchWithTimeout(
+  url: string,
+  ms: number,
+  init?: RequestInit
+) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), ms);
   try {
-    return await fetch(url, { signal: ctrl.signal });
+    return await fetch(url, { ...init, signal: ctrl.signal });
   } finally {
     clearTimeout(timer);
   }
+}
+
+type MyMemoryResponse = {
+  responseData?: { translatedText?: string };
+  matches?: { translation?: string; match?: number }[];
+};
+
+function pickTranslation(
+  data: MyMemoryResponse,
+  target: "en" | "bn"
+): string | null {
+  const seen = new Set<string>();
+  const candidates: string[] = [];
+  const push = (value?: string) => {
+    const t = value?.trim();
+    if (!t || seen.has(t)) return;
+    seen.add(t);
+    candidates.push(t);
+  };
+
+  push(data.responseData?.translatedText);
+  for (const m of [...(data.matches || [])].sort(
+    (a, b) => (b.match ?? 0) - (a.match ?? 0)
+  )) {
+    push(m.translation);
+  }
+
+  for (const t of candidates) {
+    if (target === "en") {
+      const cleaned = t
+        .toLowerCase()
+        .replace(/^(the|a|an)\s+/i, "")
+        .replace(/[^a-z'-]/gi, "")
+        .trim();
+      if (cleaned.length >= 2 && cleaned.length <= 40) return cleaned;
+      continue;
+    }
+    if (BN_SCRIPT.test(t)) return t;
+  }
+  return null;
+}
+
+async function translateMyMemory(
+  text: string,
+  sl: "en" | "bn",
+  tl: "en" | "bn"
+): Promise<string | null> {
+  const langpair =
+    sl === "en" && tl === "bn"
+      ? "en|bn-BD"
+      : sl === "bn" && tl === "en"
+        ? "bn|en"
+        : `${sl}|${tl}`;
+  try {
+    const res = await fetchWithTimeout(
+      `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${langpair}`,
+      5_000
+    );
+    if (!res.ok) return null;
+    const data = (await res.json()) as MyMemoryResponse;
+    return pickTranslation(data, tl);
+  } catch {
+    return null;
+  }
+}
+
+async function translateGtx(
+  text: string,
+  sl: string,
+  tl: string
+): Promise<string | null> {
+  try {
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sl}&tl=${tl}&dt=t&q=${encodeURIComponent(text)}`;
+    const res = await fetchWithTimeout(url, 5_000);
+    if (!res.ok) return null;
+    const data = (await res.json()) as unknown;
+    const translated = (data as string[][][])?.[0]?.[0]?.[0];
+    return typeof translated === "string" && translated.trim()
+      ? translated.trim()
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+async function translateText(
+  text: string,
+  sl: "en" | "bn",
+  tl: "en" | "bn"
+): Promise<string | null> {
+  const primary = await translateMyMemory(text, sl, tl);
+  if (primary) return primary;
+  return translateGtx(text, sl, tl);
 }
 
 function parseBanglaGlosses(raw: string): { text: string; partOfSpeech?: string }[] {
@@ -46,26 +143,6 @@ function parseBanglaGlosses(raw: string): { text: string; partOfSpeech?: string 
     if (out.length >= 24) break;
   }
   return out;
-}
-
-async function translateGtx(
-  text: string,
-  sl: string,
-  tl: string
-): Promise<string | null> {
-  try {
-    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sl}&tl=${tl}&dt=t&q=${encodeURIComponent(text)}`;
-    const res = await fetchWithTimeout(url, 5_000);
-    if (!res.ok) return null;
-    const data = (await res.json()) as unknown;
-    // [[[translated, original, ...]]]
-    const translated = (data as string[][][])?.[0]?.[0]?.[0];
-    return typeof translated === "string" && translated.trim()
-      ? translated.trim()
-      : null;
-  } catch {
-    return null;
-  }
 }
 
 type EnglishDictEntry = {
@@ -238,7 +315,13 @@ async function fetchEnglishDict(word: string): Promise<EnglishDictEntry | null> 
 async function fetchBanglaBundle(word: string) {
   const res = await fetchWithTimeout(
     `https://dictionary.zone.id/api.php?word=${encodeURIComponent(word)}`,
-    7_000
+    7_000,
+    {
+      headers: {
+        Accept: "application/json",
+        "User-Agent": "Flowdesk/1.0",
+      },
+    }
   );
   if (!res.ok) return null;
   return (await res.json()) as {
@@ -331,7 +414,7 @@ export async function GET(req: Request) {
     let englishGloss: string | null = null;
 
     if (isBanglaScript) {
-      englishGloss = await translateGtx(rawQ, "bn", "en");
+      englishGloss = await translateText(rawQ, "bn", "en");
       // Strip leading articles for dictionary lookup
       lookupWord = (englishGloss || "")
         .toLowerCase()
@@ -382,9 +465,8 @@ export async function GET(req: Request) {
           ? toEnMeanings(enEntry)
           : [];
 
-    if (!bangla.length && !meanings.length) {
-      // Last resort: EN→BN machine translation of the English word
-      const mt = await translateGtx(lookupWord, "en", "bn");
+    if (bangla.length === 0 && lookupWord) {
+      const mt = await translateText(lookupWord, "en", "bn");
       if (mt) bangla.push({ text: mt });
     }
 
