@@ -66,6 +66,3 @@ android/local.properties
 .vercel
 .env*
 !.env.example
-
-.vercel
-.env*
