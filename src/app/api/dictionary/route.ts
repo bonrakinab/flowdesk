@@ -17,6 +17,10 @@ type DictResult = {
   /** Bangla glosses / translations (when lang=bn or bilingual) */
   bangla?: { text: string; partOfSpeech?: string }[];
   englishGloss?: string | null;
+  /** Flat English synonym list (especially for BN mode) */
+  englishSynonyms?: string[];
+  /** Paired EN ↔ BN synonyms */
+  crossSynonyms?: { en: string; bn: string | null }[];
 };
 
 const BN_SCRIPT = /[\u0980-\u09FF]/;
@@ -126,6 +130,91 @@ async function translateText(
   const primary = await translateMyMemory(text, sl, tl);
   if (primary) return primary;
   return translateGtx(text, sl, tl);
+}
+
+function uniqueStrings(values: string[], limit = 16) {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of values) {
+    const v = raw.trim();
+    if (!v) continue;
+    const key = v.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(v);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+async function buildCrossSynonyms(
+  englishSynonyms: string[],
+  _banglaGlosses: { text: string }[],
+  limit = 10
+): Promise<{ en: string; bn: string | null }[]> {
+  const words = uniqueStrings(englishSynonyms, limit);
+  const pairs = await Promise.all(
+    words.map(async (en) => {
+      const bn = await translateText(en, "en", "bn");
+      return { en, bn };
+    })
+  );
+  return pairs.filter((p) => p.bn);
+}
+
+async function buildReverseCrossSynonyms(
+  banglaGlosses: { text: string }[],
+  limit = 8
+): Promise<{ en: string; bn: string }[]> {
+  const pairs = await Promise.all(
+    banglaGlosses.slice(0, limit).map(async (g) => {
+      const en = await translateText(g.text, "bn", "en");
+      return en ? { en, bn: g.text } : null;
+    })
+  );
+  return pairs.filter((p): p is { en: string; bn: string } => Boolean(p));
+}
+
+function mergeCrossSynonyms(
+  forward: { en: string; bn: string | null }[],
+  reverse: { en: string; bn: string }[]
+) {
+  const out: { en: string; bn: string | null }[] = [];
+  const seen = new Set<string>();
+  const push = (en: string, bn: string | null) => {
+    const key = `${en.toLowerCase()}|${bn || ""}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({ en, bn });
+  };
+  for (const p of forward) push(p.en, p.bn);
+  for (const p of reverse) push(p.en, p.bn);
+  return out.slice(0, 16);
+}
+
+function collectEnglishSynonyms(
+  bnBundle: Awaited<ReturnType<typeof fetchBanglaBundle>>,
+  enEntry: EnglishDictEntry | null,
+  lookupWord: string
+) {
+  const fromBnApi = (bnBundle?.synonyms || []).filter(
+    (s) => s.toLowerCase() !== lookupWord.toLowerCase()
+  );
+  const fromEn = enEntry
+    ? toEnMeanings(enEntry).flatMap((m) => m.synonyms)
+    : [];
+  return uniqueStrings([...fromBnApi, ...fromEn], 20);
+}
+
+function attachMeaningSynonyms(
+  meanings: DictMeaning[],
+  englishSynonyms: string[]
+) {
+  if (!meanings.length || !englishSynonyms.length) return meanings;
+  if (meanings[0].synonyms.length) return meanings;
+  return meanings.map((m, i) =>
+    i === 0 ? { ...m, synonyms: englishSynonyms.slice(0, 12) } : m
+  );
 }
 
 function parseBanglaGlosses(raw: string): { text: string; partOfSpeech?: string }[] {
@@ -385,22 +474,36 @@ export async function GET(req: Request) {
 
   try {
     if (lang === "en" && !isBanglaScript) {
-      const entry = await fetchEnglishDict(qEn);
+      const [entry, bnBundle] = await Promise.all([
+        fetchEnglishDict(qEn),
+        fetchBanglaBundle(qEn),
+      ]);
       if (!entry) {
         return NextResponse.json(
           { error: "No entry found", word: qEn },
           { status: 404 }
         );
       }
+      const bangla = parseBanglaGlosses(bnBundle?.bangla_translation2 || "");
+      const meanings = toEnMeanings(entry);
+      const englishSynonyms = collectEnglishSynonyms(bnBundle, entry, qEn);
+      const [forwardCross, reverseCross] = await Promise.all([
+        buildCrossSynonyms(englishSynonyms, bangla),
+        buildReverseCrossSynonyms(bangla),
+      ]);
       const phonetic =
         entry.phonetic ||
         entry.phonetics?.find((p) => p.text)?.text ||
+        bnBundle?.english_pronunciation?.phonetic ||
         null;
       const payload: DictResult = {
         word: entry.word || qEn,
         phonetic,
         lang: "en",
-        meanings: toEnMeanings(entry),
+        meanings: attachMeaningSynonyms(meanings, englishSynonyms),
+        bangla: bangla.length ? bangla : undefined,
+        englishSynonyms,
+        crossSynonyms: mergeCrossSynonyms(forwardCross, reverseCross),
       };
       return NextResponse.json(payload, {
         headers: {
@@ -477,6 +580,16 @@ export async function GET(req: Request) {
       );
     }
 
+    const englishSynonyms = collectEnglishSynonyms(
+      bnBundle,
+      enEntry,
+      lookupWord
+    );
+    const [forwardCross, reverseCross] = await Promise.all([
+      buildCrossSynonyms(englishSynonyms, bangla),
+      buildReverseCrossSynonyms(bangla),
+    ]);
+
     const phonetic =
       bnBundle?.english_pronunciation?.phonetic ||
       enEntry?.phonetic ||
@@ -487,18 +600,14 @@ export async function GET(req: Request) {
       word: isBanglaScript ? rawQ : bnBundle?.word || enEntry?.word || lookupWord,
       phonetic,
       lang: "bn",
-      meanings,
+      meanings: attachMeaningSynonyms(meanings, englishSynonyms),
       bangla,
+      englishSynonyms,
+      crossSynonyms: mergeCrossSynonyms(forwardCross, reverseCross),
       englishGloss: isBanglaScript
         ? englishGloss || lookupWord
         : null,
     };
-
-    // Attach English synonyms as insertable chips when useful
-    if (enEntry && payload.meanings[0] && !payload.meanings[0].synonyms.length) {
-      const syns = toEnMeanings(enEntry).flatMap((m) => m.synonyms).slice(0, 12);
-      if (syns.length) payload.meanings[0].synonyms = syns;
-    }
 
     return NextResponse.json(payload, {
       headers: {

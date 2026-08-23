@@ -15,6 +15,8 @@ type DictResult = {
   }[];
   bangla?: { text: string; partOfSpeech?: string }[];
   englishGloss?: string | null;
+  englishSynonyms?: string[];
+  crossSynonyms?: { en: string; bn: string | null }[];
 };
 
 type Lang = "en" | "bn";
@@ -189,7 +191,7 @@ export function PoemDictionary({
             {result.bangla && result.bangla.length > 0 && (
               <div>
                 <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-teal-900">
-                  বাংলা অর্থ
+                  {result.lang === "en" ? "Bangla synonyms" : "বাংলা সমার্থক"}
                 </div>
                 <div className="flex flex-wrap gap-1.5">
                   {result.bangla.map((b) => (
@@ -206,6 +208,67 @@ export function PoemDictionary({
                           ({b.partOfSpeech})
                         </span>
                       ) : null}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {result.crossSynonyms && result.crossSynonyms.length > 0 && (
+              <div>
+                <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-teal-900">
+                  Synonyms · EN ↔ BN
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {result.crossSynonyms.map((pair) => (
+                    <button
+                      key={`${pair.en}-${pair.bn}`}
+                      type="button"
+                      onClick={() =>
+                        onInsertWord?.(result.lang === "bn" ? pair.bn || pair.en : pair.en)
+                      }
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        void lookup(pair.en, "en");
+                      }}
+                      className="rounded-full border border-amber-900/20 bg-[#fffaf3] px-2.5 py-1 text-[11px] text-stone-900 transition hover:border-teal-800/50 hover:text-teal-950"
+                      title="Click to insert · right-click English to look up"
+                    >
+                      <span className="font-medium">{pair.en}</span>
+                      {pair.bn ? (
+                        <>
+                          <span className="mx-1 text-stone-400">·</span>
+                          <span>{pair.bn}</span>
+                        </>
+                      ) : null}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {result.englishSynonyms && result.englishSynonyms.length > 0 && (
+              <div>
+                <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-teal-900">
+                  English synonyms
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {result.englishSynonyms.map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => {
+                        if (onInsertWord) onInsertWord(s);
+                        else void lookup(s, "en");
+                      }}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        void lookup(s, lang);
+                      }}
+                      className="rounded-full border border-amber-900/20 bg-[#fffaf3] px-2 py-0.5 text-[11px] text-stone-800 transition hover:border-teal-800/50 hover:text-teal-950"
+                      title="Click to insert · right-click to look up"
+                    >
+                      {s}
                     </button>
                   ))}
                 </div>
@@ -229,7 +292,7 @@ export function PoemDictionary({
                     </li>
                   ))}
                 </ol>
-                {m.synonyms.length > 0 && (
+                {m.synonyms.length > 0 && !result.englishSynonyms?.length && (
                   <div className="mt-2 flex flex-wrap gap-1.5">
                     {m.synonyms.map((s) => (
                       <button
