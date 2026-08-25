@@ -1,49 +1,33 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { auth } from "@/lib/auth";
+import { prisma } from "@/lib/db";
 
-/**
- * Disconnect Google Health API
- * DELETE /api/fitness/disconnect
- */
+const PROVIDER = "google_health";
+
+/** Disconnect Google Health while keeping previously synced data. */
 export async function DELETE() {
   try {
-    const session = await getServerSession(authOptions);
-    
+    const session = await auth();
     if (!session?.user?.email) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const user = await prisma.user.findUnique({
-      where: { email: session.user.email },
+      where: { email: session.user.email.toLowerCase() },
     });
-
     if (!user) {
-      return NextResponse.json(
-        { error: "User not found" },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
-    // Delete fitness connection
-    await prisma.fitnessConnection.delete({
-      where: {
-        userId_provider: {
-          userId: user.id,
-          provider: 'google_health',
-        },
-      },
+    await prisma.fitnessConnection.deleteMany({
+      where: { userId: user.id, provider: PROVIDER },
     });
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error('Error disconnecting fitness:', error);
+    console.error("Error disconnecting Google Health:", error);
     return NextResponse.json(
-      { error: "Failed to disconnect" },
+      { error: "Failed to disconnect Google Health" },
       { status: 500 }
     );
   }

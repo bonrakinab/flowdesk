@@ -1,122 +1,137 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { auth } from "@/lib/auth";
+import { prisma } from "@/lib/db";
 
-/**
- * Google Health API OAuth callback handler
- * GET /api/fitness/callback?code=...&state=...
- */
+const STATE_COOKIE = "flowdesk_google_health_oauth_state";
+
+function getGoogleOAuthCredentials() {
+  return {
+    clientId: process.env.GOOGLE_CLIENT_ID || process.env.AUTH_GOOGLE_ID,
+    clientSecret:
+      process.env.GOOGLE_CLIENT_SECRET || process.env.AUTH_GOOGLE_SECRET,
+  };
+}
+
+function getAppUrl(req: NextRequest) {
+  return (
+    process.env.NEXTAUTH_URL ||
+    process.env.AUTH_URL ||
+    req.nextUrl.origin
+  ).replace(/\/$/, "");
+}
+
+function redirectWithClearedState(req: NextRequest, suffix: string) {
+  const response = NextResponse.redirect(`${getAppUrl(req)}/health${suffix}`);
+  response.cookies.set(STATE_COOKIE, "", {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: 0,
+  });
+  return response;
+}
+
+/** Google Health API v4 OAuth callback. */
 export async function GET(req: NextRequest) {
   try {
-    const searchParams = req.nextUrl.searchParams;
-    const code = searchParams.get('code');
-    const state = searchParams.get('state'); // user email
-    const error = searchParams.get('error');
-
-    if (error) {
-      console.error('OAuth error:', error);
-      return NextResponse.redirect(
-        `${req.nextUrl.origin}/health?error=access_denied`
-      );
+    const session = await auth();
+    if (!session?.user?.email) {
+      return redirectWithClearedState(req, "?error=unauthorized");
     }
 
-    if (!code || !state) {
-      return NextResponse.redirect(
-        `${req.nextUrl.origin}/health?error=invalid_callback`
-      );
+    const code = req.nextUrl.searchParams.get("code");
+    const state = req.nextUrl.searchParams.get("state");
+    const oauthError = req.nextUrl.searchParams.get("error");
+    const expectedState = req.cookies.get(STATE_COOKIE)?.value;
+
+    if (oauthError) {
+      console.error("Google Health OAuth error:", oauthError);
+      return redirectWithClearedState(req, "?error=access_denied");
     }
 
-    const clientId = process.env.GOOGLE_CLIENT_ID;
-    const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-    const redirectUri = process.env.NEXTAUTH_URL 
-      ? `${process.env.NEXTAUTH_URL}/api/fitness/callback`
-      : `${req.nextUrl.origin}/api/fitness/callback`;
+    if (!code || !state || !expectedState || state !== expectedState) {
+      return redirectWithClearedState(req, "?error=invalid_state");
+    }
 
+    const { clientId, clientSecret } = getGoogleOAuthCredentials();
     if (!clientId || !clientSecret) {
-      return NextResponse.redirect(
-        `${req.nextUrl.origin}/health?error=config_missing`
-      );
+      return redirectWithClearedState(req, "?error=config_missing");
     }
 
-    // Exchange code for tokens
-    const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
+    const redirectUri = `${getAppUrl(req)}/api/fitness/callback`;
+    const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
         code,
         client_id: clientId,
         client_secret: clientSecret,
         redirect_uri: redirectUri,
-        grant_type: 'authorization_code',
+        grant_type: "authorization_code",
       }),
+      cache: "no-store",
     });
 
     if (!tokenResponse.ok) {
-      const errorData = await tokenResponse.text();
-      console.error('Token exchange failed:', errorData);
-      return NextResponse.redirect(
-        `${req.nextUrl.origin}/health?error=token_exchange_failed`
+      console.error(
+        "Google Health token exchange failed:",
+        tokenResponse.status,
+        await tokenResponse.text()
       );
+      return redirectWithClearedState(req, "?error=token_exchange_failed");
     }
 
     const tokens = await tokenResponse.json();
-    const { access_token, refresh_token, expires_in, scope } = tokens;
-
-    if (!access_token || !refresh_token) {
-      return NextResponse.redirect(
-        `${req.nextUrl.origin}/health?error=incomplete_tokens`
-      );
-    }
-
-    // Find user by email (from state)
     const user = await prisma.user.findUnique({
-      where: { email: state },
+      where: { email: session.user.email.toLowerCase() },
     });
 
     if (!user) {
-      return NextResponse.redirect(
-        `${req.nextUrl.origin}/health?error=user_not_found`
-      );
+      return redirectWithClearedState(req, "?error=user_not_found");
     }
 
-    // Store or update fitness connection
-    const expiresAt = new Date(Date.now() + expires_in * 1000);
-    
-    await prisma.fitnessConnection.upsert({
+    const existing = await prisma.fitnessConnection.findUnique({
       where: {
-        userId_provider: {
-          userId: user.id,
-          provider: 'google_health',
-        },
-      },
-      create: {
-        userId: user.id,
-        provider: 'google_health',
-        accessToken: access_token,
-        refreshToken: refresh_token,
-        expiresAt,
-        scope: scope || null,
-        syncEnabled: true,
-      },
-      update: {
-        accessToken: access_token,
-        refreshToken: refresh_token,
-        expiresAt,
-        scope: scope || null,
-        syncEnabled: true,
-        updatedAt: new Date(),
+        userId_provider: { userId: user.id, provider: "google_health" },
       },
     });
 
-    // Redirect back to health page with success
-    return NextResponse.redirect(
-      `${req.nextUrl.origin}/health?connected=true`
-    );
+    const accessToken = tokens.access_token as string | undefined;
+    const refreshToken =
+      (tokens.refresh_token as string | undefined) || existing?.refreshToken;
+    const expiresIn = Number(tokens.expires_in || 3600);
+
+    if (!accessToken || !refreshToken) {
+      return redirectWithClearedState(req, "?error=incomplete_tokens");
+    }
+
+    const expiresAt = new Date(Date.now() + expiresIn * 1000);
+    await prisma.fitnessConnection.upsert({
+      where: {
+        userId_provider: { userId: user.id, provider: "google_health" },
+      },
+      create: {
+        userId: user.id,
+        provider: "google_health",
+        accessToken,
+        refreshToken,
+        expiresAt,
+        scope: typeof tokens.scope === "string" ? tokens.scope : null,
+        syncEnabled: true,
+      },
+      update: {
+        accessToken,
+        refreshToken,
+        expiresAt,
+        scope: typeof tokens.scope === "string" ? tokens.scope : null,
+        syncEnabled: true,
+      },
+    });
+
+    return redirectWithClearedState(req, "?connected=true");
   } catch (error) {
-    console.error('Error in fitness OAuth callback:', error);
-    return NextResponse.redirect(
-      `${req.nextUrl.origin}/health?error=server_error`
-    );
+    console.error("Error in Google Health OAuth callback:", error);
+    return redirectWithClearedState(req, "?error=server_error");
   }
 }
