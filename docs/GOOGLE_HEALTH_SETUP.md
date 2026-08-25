@@ -1,184 +1,86 @@
 # Google Health API Integration Setup
 
-This guide will help you set up Google Health API integration to track your fitness data in Flowdesk.
+Flowdesk uses the Google Health API v4 for steps, distance, total calories, active minutes, heart rate, and sleep.
 
-## Overview
+## Google Cloud setup
 
-The Google Health API integration allows you to:
-- Track daily steps, distance, and calories burned
-- Monitor heart rate statistics
-- View sleep duration
-- See activity trends over time
+1. Open Google Cloud Console and select the project used by Flowdesk.
+2. Enable **Google Health API**.
+3. Configure the OAuth consent screen. If the app is still in Testing, add the Flowdesk Google account as a test user.
+4. Add these read-only Google Health scopes on the OAuth Data Access page:
+   - `https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly`
+   - `https://www.googleapis.com/auth/googlehealth.health_metrics_and_measurements.readonly`
+   - `https://www.googleapis.com/auth/googlehealth.sleep.readonly`
+5. Use a **Web application** OAuth client.
+6. Add the exact callback URI used by Flowdesk:
+   - Local: `http://localhost:3000/api/fitness/callback`
+   - Production: `https://<your-production-domain>/api/fitness/callback`
 
-## Prerequisites
+## Environment variables
 
-- A Google account with Google Fit or other fitness app data
-- Access to [Google Cloud Console](https://console.cloud.google.com)
-
-## Setup Steps
-
-### 1. Create a Google Cloud Project
-
-1. Go to [Google Cloud Console](https://console.cloud.google.com)
-2. Click **Select a project** → **New Project**
-3. Name your project (e.g., "Flowdesk Fitness")
-4. Click **Create**
-
-### 2. Enable Google Fitness API
-
-1. In the Cloud Console, go to **APIs & Services** → **Library**
-2. Search for "Fitness API"
-3. Click **Google Fitness API**
-4. Click **Enable**
-
-### 3. Configure OAuth Consent Screen
-
-1. Go to **APIs & Services** → **OAuth consent screen**
-2. Select **External** user type
-3. Click **Create**
-4. Fill in the required fields:
-   - **App name**: Flowdesk
-   - **User support email**: Your email
-   - **Developer contact**: Your email
-5. Click **Save and Continue**
-
-6. On the **Scopes** page, click **Add or Remove Scopes**
-7. Add these scopes:
-   - `https://www.googleapis.com/auth/fitness.activity.read`
-   - `https://www.googleapis.com/auth/fitness.heart_rate.read`
-   - `https://www.googleapis.com/auth/fitness.sleep.read`
-   - `https://www.googleapis.com/auth/fitness.location.read`
-   - `https://www.googleapis.com/auth/fitness.body.read`
-8. Click **Update** and **Save and Continue**
-
-9. On the **Test users** page (if in testing mode), add your Google account email
-10. Click **Save and Continue**
-
-### 4. Create OAuth 2.0 Credentials
-
-1. Go to **APIs & Services** → **Credentials**
-2. Click **Create Credentials** → **OAuth client ID**
-3. Select **Web application**
-4. Name it (e.g., "Flowdesk Web")
-5. Under **Authorized redirect URIs**, add:
-   - For local development: `http://localhost:3000/api/fitness/callback`
-   - For production: `https://your-domain.com/api/fitness/callback`
-6. Click **Create**
-7. Copy the **Client ID** and **Client Secret**
-
-### 5. Configure Environment Variables
-
-Add these to your `.env.local` file:
+The Health integration reuses the normal Flowdesk Google OAuth credentials when available:
 
 ```env
-# Google OAuth (if not already set)
-GOOGLE_CLIENT_ID=your_client_id_here
-GOOGLE_CLIENT_SECRET=your_client_secret_here
-
-# NextAuth URL (required for OAuth redirect)
-NEXTAUTH_URL=http://localhost:3000
-# For production:
-# NEXTAUTH_URL=https://your-domain.com
+AUTH_GOOGLE_ID=...
+AUTH_GOOGLE_SECRET=...
+AUTH_URL=https://<your-production-domain>
 ```
 
-### 6. Update Database
+For a separate Health OAuth client, these optional overrides are also supported:
 
-Run the Prisma migration to add fitness tables:
+```env
+GOOGLE_CLIENT_ID=...
+GOOGLE_CLIENT_SECRET=...
+NEXTAUTH_URL=https://<your-production-domain>
+```
+
+Do not commit OAuth secrets to the repository. If a client secret has ever been committed, rotate it in Google Cloud and replace the deployed environment variable.
+
+## Database
+
+The Google Health tables are created by the checked-in Prisma migration. Production deployments should run:
 
 ```bash
-npx prisma migrate dev
+npx prisma migrate deploy
 ```
 
-Or if you're using a cloud database, push the schema:
-
-```bash
-npx prisma db push
-```
-
-### 7. Restart Your Development Server
-
-```bash
-npm run dev
-```
+Flowdesk's production build is expected to apply migrations before the Next.js build.
 
 ## Usage
 
-### Connect Your Google Account
+1. Open **More → Health**.
+2. Select **Connect Google Health**.
+3. Approve the requested Health permissions.
+4. Flowdesk returns to `/health` and performs a sync.
+5. Use **Sync Now** for later refreshes.
 
-1. Navigate to the **Health** page in Flowdesk
-2. Click **Connect Google Health**
-3. Sign in with your Google account
-4. Grant the requested permissions
-5. You'll be redirected back to Flowdesk
-
-### Sync Your Data
-
-After connecting, click **Sync Now** to fetch your fitness data from the last 30 days.
-
-The app will retrieve:
-- Steps and distance walked
-- Calories burned
-- Active minutes
-- Heart rate statistics
-- Sleep duration
-
-### View Your Statistics
-
-The Health page displays:
-- Today's stats with 7-day averages
-- Trend indicators (up/down/stable)
-- Weekly step chart
-- Color-coded widgets for each metric
+The sync requests the latest 14 days because Google Health limits daily rollup ranges for heart rate, active minutes, and total calories to 14 days. Previously stored data can still be displayed for longer periods.
 
 ## Troubleshooting
 
-### "Google OAuth not configured" Error
+### Health is missing from the website
 
-Make sure you've added `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` to your `.env.local` file and restarted the dev server.
+- Confirm the latest `main` commit deployed successfully.
+- Check the production build for Prisma migration or TypeScript errors.
+- If using an installed PWA, fully close and reopen it after a deployment; clear site data only if the old app shell remains cached.
 
-### "Failed to sync data" Error
+### OAuth configuration error
 
-1. Check that you've enabled the Google Fitness API in Cloud Console
-2. Verify all scopes are added to the OAuth consent screen
-3. Make sure you have fitness data in Google Fit or another connected app
+- Confirm either `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` or `AUTH_GOOGLE_ID`/`AUTH_GOOGLE_SECRET` is set in the production environment.
+- Confirm the callback URI exactly matches `/api/fitness/callback` on the deployed domain.
+- Confirm Google Health API is enabled and the three scopes above are allowed for the OAuth client.
 
-### No Data Showing
+### Sync returns only some metrics
 
-1. Ensure you have a fitness tracking app (Google Fit, Samsung Health, etc.) that syncs to Google Fit
-2. Verify the app has recorded data
-3. Try syncing again with the **Sync Now** button
+Google Health supports partial consent. Flowdesk keeps syncing any metrics the user approved instead of failing the whole sync. Reconnect Google Health and grant the missing permissions if desired.
 
-### OAuth Redirect Mismatch
+### No data appears
 
-Make sure your redirect URI in Google Cloud Console exactly matches:
-- `http://localhost:3000/api/fitness/callback` (local)
-- `https://your-domain.com/api/fitness/callback` (production)
+Google Health only returns data that has reached the user's Google Health account from a supported source. Make sure the relevant tracker/app has synced first.
 
-### Access Denied During OAuth
+## Security
 
-If Google shows "Access blocked: This app's request is invalid":
-1. Add your email to **Test users** in the OAuth consent screen
-2. Or publish your app (for production use)
-
-## Data Privacy
-
-- Your fitness data is stored securely in your Flowdesk database
-- OAuth tokens are encrypted and stored safely
-- Only you can see your fitness data
-- You can disconnect at any time by clicking **Disconnect** on the Health page
-
-## Limitations
-
-- Historical data is limited to what Google Fit provides (typically last 30 days)
-- Sync is manual (click "Sync Now" to update)
-- Some metrics may not be available if not tracked by your fitness app
-
-## Next Steps
-
-- Set up automatic daily syncing (coming soon)
-- Export fitness data
-- Connect other fitness services (Fitbit, Apple Health)
-
-## Support
-
-For issues or questions, please open an issue on the GitHub repository.
+- OAuth state is protected with a short-lived HTTP-only cookie.
+- The user identity is taken from the authenticated Flowdesk session, not from an OAuth query parameter.
+- OAuth credentials belong only in deployment environment variables, never in committed files.
+- Disconnecting removes the stored Google Health connection tokens but keeps already-synced daily health records.
