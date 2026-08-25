@@ -18,7 +18,7 @@ import {
 
 const links = [
   { href: "/agent", label: "Agent", icon: Bot, desc: "Chat to plan tickets, events & more" },
-  { href: "/health", label: "Health", icon: Activity, desc: "Google Fit stats & activity" },
+  { href: "/health", label: "Health", icon: Activity, desc: "Google Health activity, heart rate & sleep" },
   { href: "/inbox", label: "Inbox", icon: Inbox, desc: "Capture & triage tasks" },
   { href: "/list", label: "List", icon: List, desc: "Dense ticket table" },
   { href: "/poems", label: "Poems", icon: Feather, desc: "Write, doodle & dictionary" },
@@ -35,28 +35,28 @@ export default function MorePage() {
   return (
     <div className="p-4 md:p-8">
       <div className="page-canvas mx-auto max-w-lg">
-      <h1 className="font-[family-name:var(--font-display)] text-3xl">More</h1>
-      <p className="text-sm text-muted mt-1">More pages</p>
-      <div className="mt-6 space-y-2">
-        {links.map((l) => {
-          const Icon = l.icon;
-          return (
-            <Link
-              key={l.href}
-              href={l.href}
-              className="flex items-center gap-4 rounded-2xl border border-border bg-card px-4 py-3 hover:border-accent/40 transition"
-            >
-              <div className="h-10 w-10 rounded-xl bg-accent-soft text-accent grid place-items-center">
-                <Icon size={18} />
-              </div>
-              <div>
-                <div className="font-medium">{l.label}</div>
-                <div className="text-xs text-muted">{l.desc}</div>
-              </div>
-            </Link>
-          );
-        })}
-      </div>
+        <h1 className="font-[family-name:var(--font-display)] text-3xl">More</h1>
+        <p className="text-sm text-muted mt-1">More pages</p>
+        <div className="mt-6 space-y-2">
+          {links.map((l) => {
+            const Icon = l.icon;
+            return (
+              <Link
+                key={l.href}
+                href={l.href}
+                className="flex items-center gap-4 rounded-2xl border border-border bg-card px-4 py-3 hover:border-accent/40 transition"
+              >
+                <div className="h-10 w-10 rounded-xl bg-accent-soft text-accent grid place-items-center">
+                  <Icon size={18} />
+                </div>
+                <div>
+                  <div className="font-medium">{l.label}</div>
+                  <div className="text-xs text-muted">{l.desc}</div>
+                </div>
+              </Link>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
