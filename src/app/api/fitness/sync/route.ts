@@ -242,24 +242,28 @@ function applySleep(days: Map<string, DailyMetric>, points: Array<Record<string,
 async function saveDays(userId: string, days: Map<string, DailyMetric>) {
   let count = 0;
   for (const day of days.values()) {
-    const update: Record<string, unknown> = {
-      rawData: JSON.stringify(day.raw),
+    const rawData = JSON.stringify(day.raw);
+    const update = {
+      rawData,
+      ...(day.steps !== null && Number.isFinite(day.steps) ? { steps: day.steps } : {}),
+      ...(day.distance !== null && Number.isFinite(day.distance) ? { distance: day.distance } : {}),
+      ...(day.calories !== null && Number.isFinite(day.calories) ? { calories: day.calories } : {}),
+      ...(day.activeMinutes !== null && Number.isFinite(day.activeMinutes)
+        ? { activeMinutes: day.activeMinutes }
+        : {}),
+      ...(day.heartRateAvg !== null && Number.isFinite(day.heartRateAvg)
+        ? { heartRateAvg: day.heartRateAvg }
+        : {}),
+      ...(day.heartRateMin !== null && Number.isFinite(day.heartRateMin)
+        ? { heartRateMin: day.heartRateMin }
+        : {}),
+      ...(day.heartRateMax !== null && Number.isFinite(day.heartRateMax)
+        ? { heartRateMax: day.heartRateMax }
+        : {}),
+      ...(day.sleepMinutes !== null && Number.isFinite(day.sleepMinutes)
+        ? { sleepMinutes: day.sleepMinutes }
+        : {}),
     };
-
-    for (const field of [
-      "steps",
-      "distance",
-      "calories",
-      "activeMinutes",
-      "heartRateAvg",
-      "heartRateMin",
-      "heartRateMax",
-      "sleepMinutes",
-    ] as const) {
-      if (day[field] !== null && Number.isFinite(day[field])) {
-        update[field] = day[field];
-      }
-    }
 
     await prisma.fitnessData.upsert({
       where: {
@@ -277,7 +281,7 @@ async function saveDays(userId: string, days: Map<string, DailyMetric>) {
         heartRateMin: day.heartRateMin,
         heartRateMax: day.heartRateMax,
         sleepMinutes: day.sleepMinutes,
-        rawData: JSON.stringify(day.raw),
+        rawData,
       },
       update,
     });
@@ -315,8 +319,12 @@ export async function POST() {
 
     const accessToken = await getValidAccessToken(connection);
     const today = new Date();
-    const endDate = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() + 1));
-    const startDate = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() - 13));
+    const endDate = new Date(
+      Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() + 1)
+    );
+    const startDate = new Date(
+      Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() - 13)
+    );
     const start = toCivilDate(startDate);
     const end = toCivilDate(endDate);
     const startKey = civilKey(start)!;
@@ -370,7 +378,9 @@ export async function POST() {
 
     return NextResponse.json({
       success: true,
-      message: saved ? `Synced ${saved} days of health data` : "No new health data available",
+      message: saved
+        ? `Synced ${saved} days of health data`
+        : "No new health data available",
       dataPoints: saved,
       partial: accessibleSources < results.length,
     });
@@ -410,7 +420,11 @@ export async function GET(req: Request) {
 
     const [data, connection] = await Promise.all([
       prisma.fitnessData.findMany({
-        where: { userId: user.id, provider: PROVIDER, date: { gte: startDate } },
+        where: {
+          userId: user.id,
+          provider: PROVIDER,
+          date: { gte: startDate },
+        },
         orderBy: { date: "asc" },
         select: {
           date: true,
@@ -433,6 +447,9 @@ export async function GET(req: Request) {
     return NextResponse.json({ data, connection });
   } catch (error) {
     console.error("Error fetching health data:", error);
-    return NextResponse.json({ error: "Failed to fetch health data" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Failed to fetch health data" },
+      { status: 500 }
+    );
   }
 }
