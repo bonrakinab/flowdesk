@@ -1,0 +1,56 @@
+import { NextRequest, NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
+
+const GOOGLE_HEALTH_SCOPES = [
+  "https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly",
+  "https://www.googleapis.com/auth/googlehealth.health_metrics_and_measurements.readonly",
+  "https://www.googleapis.com/auth/googlehealth.sleep.readonly",
+];
+
+/**
+ * Initiates the Google Health API v4 OAuth flow.
+ * GET /api/fitness/connect
+ */
+export async function GET(req: NextRequest) {
+  try {
+    const session = await getServerSession(authOptions);
+
+    if (!session?.user?.email) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const clientId = process.env.GOOGLE_CLIENT_ID || process.env.AUTH_GOOGLE_ID;
+    const appUrl = (
+      process.env.NEXTAUTH_URL ||
+      process.env.AUTH_URL ||
+      req.nextUrl.origin
+    ).replace(/\/$/, "");
+    const redirectUri = `${appUrl}/api/fitness/callback`;
+
+    if (!clientId) {
+      return NextResponse.json(
+        { error: "Google OAuth is not configured" },
+        { status: 500 }
+      );
+    }
+
+    const authUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+    authUrl.searchParams.set("client_id", clientId);
+    authUrl.searchParams.set("redirect_uri", redirectUri);
+    authUrl.searchParams.set("response_type", "code");
+    authUrl.searchParams.set("scope", GOOGLE_HEALTH_SCOPES.join(" "));
+    authUrl.searchParams.set("access_type", "offline");
+    authUrl.searchParams.set("prompt", "consent");
+    authUrl.searchParams.set("include_granted_scopes", "true");
+    authUrl.searchParams.set("state", session.user.email);
+
+    return NextResponse.redirect(authUrl.toString());
+  } catch (error) {
+    console.error("Error initiating Google Health OAuth:", error);
+    return NextResponse.json(
+      { error: "Failed to initiate Google Health connection" },
+      { status: 500 }
+    );
+  }
+}
