@@ -1,81 +1,53 @@
 # Google Health API - Vercel Deployment Guide
 
-## Your Google OAuth Credentials
+## Required environment variables
 
-```
-Client ID: 107915318175-r69aeejmsimlicms09qsftdl37efk9bc.apps.googleusercontent.com
-Client Secret: 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
-```
-
-## Step 1: Add Environment Variables in Vercel
-
-1. Go to [Vercel Dashboard](https://vercel.com/dashboard)
-2. Select your **flowdesk** project
-3. Click **Settings** → **Environment Variables**
-4. Add these variables (click "Add New" for each):
-
-### Required Variables:
+Configure these in Vercel under **Project → Settings → Environment Variables** for Production, Preview, and Development as appropriate:
 
 | Name | Value |
-|------|-------|
-| `GOOGLE_CLIENT_ID` | `107915318175-r69aeejmsimlicms09qsftdl37efk9bc.apps.googleusercontent.com` |
-| `GOOGLE_CLIENT_SECRET` | `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` |
-| `NEXTAUTH_URL` | Your full deployment URL (e.g., `https://flowdesk.vercel.app`) |
+|---|---|
+| `GOOGLE_CLIENT_ID` | Your Google OAuth client ID |
+| `GOOGLE_CLIENT_SECRET` | Your Google OAuth client secret |
+| `NEXTAUTH_URL` | `https://flowdesk-banik.vercel.app` |
 
-5. Make sure to select **Production**, **Preview**, and **Development** for each variable
-6. Click **Save** for each one
+Never commit the client secret to the repository.
 
-## Step 2: Add Authorized Redirect URI in Google Cloud
+## Google Cloud redirect URIs
 
-1. Go to [Google Cloud Console](https://console.cloud.google.com)
-2. Navigate to **APIs & Services** → **Credentials**
-3. Click on your OAuth 2.0 Client ID: `107915318175-r69aeejmsimlicms09qsftdl37efk9bc.apps.googleusercontent.com`
-4. Under **Authorized redirect URIs**, click **ADD URI**
-5. Add your production URL:
-   ```
-   https://your-domain.vercel.app/api/fitness/callback
-   ```
-   Replace `your-domain` with your actual Vercel deployment URL
-6. Click **SAVE**
+Add the deployed callback URLs under **Google Cloud Console → APIs & Services → Credentials → OAuth 2.0 Client → Authorized redirect URIs**:
 
-## Step 3: Redeploy
+```text
+https://flowdesk-banik.vercel.app/api/fitness/callback
+https://flowdesk-rose.vercel.app/api/fitness/callback
+```
 
-After adding environment variables:
+## Deploy
 
-1. In Vercel, go to **Deployments**
-2. Click the three dots (**•••**) on your latest deployment
-3. Click **Redeploy**
+After saving environment variables, trigger a new production deployment from Vercel or push a commit to `main` if Git integration is enabled.
 
-Or simply push a new commit to trigger deployment.
+## Test
 
-## Step 4: Test the Integration
-
-1. Visit `https://your-domain.vercel.app/health`
-2. Click **Connect Google Health**
-3. Sign in with your Google account
-4. Grant the fitness permissions
-5. You'll be redirected back
-6. Click **Sync Now** to fetch your fitness data
-
-## What You Need From Your Vercel Dashboard
-
-To complete the setup, I need your:
-- **Production URL** (e.g., `flowdesk.vercel.app` or custom domain)
-
-Once you provide this, I'll update the redirect URI instructions above.
+1. Sign in to Flowdesk.
+2. Open `/health` or use **More → Health** on mobile.
+3. Click **Connect Google Health**.
+4. Complete Google OAuth.
+5. Click **Sync Now**.
 
 ## Troubleshooting
 
-### "Redirect URI Mismatch" Error
-- Make sure the redirect URI in Google Cloud exactly matches: `https://your-domain.vercel.app/api/fitness/callback`
-- No trailing slash
-- Must use HTTPS (http won't work in production)
+### Health link is missing
+- Confirm production is deployed from the latest `main` commit.
+- Confirm `src/app/(app)/health/page.tsx` exists in the deployed revision.
+- On mobile, open **More → Health**.
 
-### "Access Blocked" Error
-- Make sure you added your email as a Test User in Google Cloud Console
-- Or publish the app (move from Testing to Production)
+### Redirect URI mismatch
+- Confirm the callback URI in Google Cloud exactly matches the deployed Flowdesk hostname.
+- Use HTTPS and no trailing slash.
 
-### "Not Connected" After OAuth
-- Check that environment variables are set in Vercel
-- Verify database is accessible (check Vercel logs)
-- Ensure you redeployed after adding environment variables
+### Not connected after OAuth
+- Confirm `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are present in the production Vercel environment.
+- Redeploy after changing environment variables.
+- Verify the database is available and the fitness tables exist.
+
+### Access blocked
+- If the OAuth consent screen is still in Testing, add the intended Google account as a test user.
