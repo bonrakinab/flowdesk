@@ -5,8 +5,9 @@ export const dynamic = "force-dynamic";
 
 type DictMeaning = {
   partOfSpeech: string;
-  definitions: { definition: string; example?: string }[];
+  definitions: { definition: string; example?: string; source?: string }[];
   synonyms: string[];
+  source?: string;
 };
 
 type DictResult = {
@@ -14,207 +15,22 @@ type DictResult = {
   phonetic: string | null;
   lang: "en" | "bn";
   meanings: DictMeaning[];
+  sources?: string[];
   /** Bangla glosses / translations (when lang=bn or bilingual) */
   bangla?: { text: string; partOfSpeech?: string }[];
   englishGloss?: string | null;
-  /** Flat English synonym list (especially for BN mode) */
-  englishSynonyms?: string[];
-  /** Paired EN ↔ BN synonyms */
-  crossSynonyms?: { en: string; bn: string | null }[];
 };
 
 const BN_SCRIPT = /[\u0980-\u09FF]/;
 
-async function fetchWithTimeout(
-  url: string,
-  ms: number,
-  init?: RequestInit
-) {
+async function fetchWithTimeout(url: string, ms: number) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), ms);
   try {
-    return await fetch(url, { ...init, signal: ctrl.signal });
+    return await fetch(url, { signal: ctrl.signal });
   } finally {
     clearTimeout(timer);
   }
-}
-
-type MyMemoryResponse = {
-  responseData?: { translatedText?: string };
-  matches?: { translation?: string; match?: number }[];
-};
-
-function pickTranslation(
-  data: MyMemoryResponse,
-  target: "en" | "bn"
-): string | null {
-  const seen = new Set<string>();
-  const candidates: string[] = [];
-  const push = (value?: string) => {
-    const t = value?.trim();
-    if (!t || seen.has(t)) return;
-    seen.add(t);
-    candidates.push(t);
-  };
-
-  push(data.responseData?.translatedText);
-  for (const m of [...(data.matches || [])].sort(
-    (a, b) => (b.match ?? 0) - (a.match ?? 0)
-  )) {
-    push(m.translation);
-  }
-
-  for (const t of candidates) {
-    if (target === "en") {
-      const cleaned = t
-        .toLowerCase()
-        .replace(/^(the|a|an)\s+/i, "")
-        .replace(/[^a-z'-]/gi, "")
-        .trim();
-      if (cleaned.length >= 2 && cleaned.length <= 40) return cleaned;
-      continue;
-    }
-    if (BN_SCRIPT.test(t)) return t;
-  }
-  return null;
-}
-
-async function translateMyMemory(
-  text: string,
-  sl: "en" | "bn",
-  tl: "en" | "bn"
-): Promise<string | null> {
-  const langpair =
-    sl === "en" && tl === "bn"
-      ? "en|bn-BD"
-      : sl === "bn" && tl === "en"
-        ? "bn|en"
-        : `${sl}|${tl}`;
-  try {
-    const res = await fetchWithTimeout(
-      `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${langpair}`,
-      5_000
-    );
-    if (!res.ok) return null;
-    const data = (await res.json()) as MyMemoryResponse;
-    return pickTranslation(data, tl);
-  } catch {
-    return null;
-  }
-}
-
-async function translateGtx(
-  text: string,
-  sl: string,
-  tl: string
-): Promise<string | null> {
-  try {
-    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sl}&tl=${tl}&dt=t&q=${encodeURIComponent(text)}`;
-    const res = await fetchWithTimeout(url, 5_000);
-    if (!res.ok) return null;
-    const data = (await res.json()) as unknown;
-    const translated = (data as string[][][])?.[0]?.[0]?.[0];
-    return typeof translated === "string" && translated.trim()
-      ? translated.trim()
-      : null;
-  } catch {
-    return null;
-  }
-}
-
-async function translateText(
-  text: string,
-  sl: "en" | "bn",
-  tl: "en" | "bn"
-): Promise<string | null> {
-  const primary = await translateMyMemory(text, sl, tl);
-  if (primary) return primary;
-  return translateGtx(text, sl, tl);
-}
-
-function uniqueStrings(values: string[], limit = 16) {
-  const out: string[] = [];
-  const seen = new Set<string>();
-  for (const raw of values) {
-    const v = raw.trim();
-    if (!v) continue;
-    const key = v.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(v);
-    if (out.length >= limit) break;
-  }
-  return out;
-}
-
-async function buildCrossSynonyms(
-  englishSynonyms: string[],
-  _banglaGlosses: { text: string }[],
-  limit = 10
-): Promise<{ en: string; bn: string | null }[]> {
-  const words = uniqueStrings(englishSynonyms, limit);
-  const pairs = await Promise.all(
-    words.map(async (en) => {
-      const bn = await translateText(en, "en", "bn");
-      return { en, bn };
-    })
-  );
-  return pairs.filter((p) => p.bn);
-}
-
-async function buildReverseCrossSynonyms(
-  banglaGlosses: { text: string }[],
-  limit = 8
-): Promise<{ en: string; bn: string }[]> {
-  const pairs = await Promise.all(
-    banglaGlosses.slice(0, limit).map(async (g) => {
-      const en = await translateText(g.text, "bn", "en");
-      return en ? { en, bn: g.text } : null;
-    })
-  );
-  return pairs.filter((p): p is { en: string; bn: string } => Boolean(p));
-}
-
-function mergeCrossSynonyms(
-  forward: { en: string; bn: string | null }[],
-  reverse: { en: string; bn: string }[]
-) {
-  const out: { en: string; bn: string | null }[] = [];
-  const seen = new Set<string>();
-  const push = (en: string, bn: string | null) => {
-    const key = `${en.toLowerCase()}|${bn || ""}`;
-    if (seen.has(key)) return;
-    seen.add(key);
-    out.push({ en, bn });
-  };
-  for (const p of forward) push(p.en, p.bn);
-  for (const p of reverse) push(p.en, p.bn);
-  return out.slice(0, 16);
-}
-
-function collectEnglishSynonyms(
-  bnBundle: Awaited<ReturnType<typeof fetchBanglaBundle>>,
-  enEntry: EnglishDictEntry | null,
-  lookupWord: string
-) {
-  const fromBnApi = (bnBundle?.synonyms || []).filter(
-    (s) => s.toLowerCase() !== lookupWord.toLowerCase()
-  );
-  const fromEn = enEntry
-    ? toEnMeanings(enEntry).flatMap((m) => m.synonyms)
-    : [];
-  return uniqueStrings([...fromBnApi, ...fromEn], 20);
-}
-
-function attachMeaningSynonyms(
-  meanings: DictMeaning[],
-  englishSynonyms: string[]
-) {
-  if (!meanings.length || !englishSynonyms.length) return meanings;
-  if (meanings[0].synonyms.length) return meanings;
-  return meanings.map((m, i) =>
-    i === 0 ? { ...m, synonyms: englishSynonyms.slice(0, 12) } : m
-  );
 }
 
 function parseBanglaGlosses(raw: string): { text: string; partOfSpeech?: string }[] {
@@ -234,183 +50,110 @@ function parseBanglaGlosses(raw: string): { text: string; partOfSpeech?: string 
   return out;
 }
 
-type EnglishDictEntry = {
-  word?: string;
-  phonetic?: string;
-  phonetics?: { text?: string }[];
-  meanings?: Array<{
-    partOfSpeech?: string;
-    definitions?: Array<{
-      definition?: string;
-      example?: string;
-      synonyms?: string[];
-    }>;
-    synonyms?: string[];
-  }>;
-  source?: "merriam-webster" | "free";
-};
-
-function cleanMwMarkup(text: string) {
-  return text
-    .replace(/\{bc\}/g, "")
-    .replace(/\{sx\|([^|}]+)\|[^}]*\}/g, "$1")
-    .replace(/\{a_link\|([^}]+)\}/g, "$1")
-    .replace(/\{dxt\|([^|}]+)\|[^}]*\}/g, "$1")
-    .replace(/\{wi\}|\{\/wi\}/g, "")
-    .replace(/\{it\}|\{\/it\}/g, "")
-    .replace(/\{[^}]+\}/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function extractMwDefinitionText(dt: unknown): string | null {
-  if (!Array.isArray(dt)) return null;
-  for (const chunk of dt) {
-    if (!Array.isArray(chunk) || chunk[0] !== "text") continue;
-    const raw = typeof chunk[1] === "string" ? chunk[1] : "";
-    const cleaned = cleanMwMarkup(raw);
-    if (cleaned) return cleaned;
+async function translateGtx(
+  text: string,
+  sl: string,
+  tl: string
+): Promise<string | null> {
+  try {
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sl}&tl=${tl}&dt=t&q=${encodeURIComponent(text)}`;
+    const res = await fetchWithTimeout(url, 8_000);
+    if (!res.ok) return null;
+    const data = (await res.json()) as unknown;
+    // [[[translated, original, ...]]]
+    const translated = (data as string[][][])?.[0]?.[0]?.[0];
+    return typeof translated === "string" && translated.trim()
+      ? translated.trim()
+      : null;
+  } catch {
+    return null;
   }
-  return null;
 }
 
-function extractMwExample(dt: unknown): string | undefined {
-  if (!Array.isArray(dt)) return undefined;
-  for (const chunk of dt) {
-    if (!Array.isArray(chunk) || chunk[0] !== "vis") continue;
-    const vis = chunk[1];
-    if (!Array.isArray(vis) || !vis[0] || typeof vis[0] !== "object") continue;
-    const t = (vis[0] as { t?: string }).t;
-    if (typeof t === "string" && t.trim()) return cleanMwMarkup(t);
-  }
-  return undefined;
-}
-
-async function fetchMerriamWebster(word: string): Promise<EnglishDictEntry | null> {
-  const key = process.env.MERRIAM_WEBSTER_DICTIONARY_KEY?.trim();
-  if (!key) return null;
-
-  const res = await fetchWithTimeout(
-    `https://www.dictionaryapi.com/api/v3/references/collegiate/json/${encodeURIComponent(word)}?key=${encodeURIComponent(key)}`,
-    6_000
-  );
-  if (!res.ok) return null;
-
-  const raw = (await res.json()) as unknown;
-  // Suggestions when no exact match: ["word1", "word2", ...]
-  if (!Array.isArray(raw) || raw.length === 0) return null;
-  if (typeof raw[0] === "string") return null;
-
-  const entries = raw as Array<{
-    meta?: { id?: string; syns?: string[][] };
-    hwi?: { hw?: string; prs?: { mw?: string }[] };
-    fl?: string;
-    shortdef?: string[];
-    def?: Array<{
-      sseq?: unknown[];
-    }>;
-  }>;
-
-  const byPos = new Map<
-    string,
-    { definition: string; example?: string }[]
-  >();
-
-  for (const entry of entries.slice(0, 6)) {
-    const pos = entry.fl || "—";
-    const defs: { definition: string; example?: string }[] = [];
-
-    for (const block of entry.def || []) {
-      for (const sseq of block.sseq || []) {
-        if (!Array.isArray(sseq)) continue;
-        for (const senseWrap of sseq) {
-          if (!Array.isArray(senseWrap) || senseWrap[0] !== "sense") continue;
-          const sense = senseWrap[1] as { dt?: unknown } | undefined;
-          const definition = extractMwDefinitionText(sense?.dt);
-          if (!definition) continue;
-          defs.push({
-            definition,
-            example: extractMwExample(sense?.dt),
-          });
-          if (defs.length >= 4) break;
-        }
-        if (defs.length >= 4) break;
-      }
-      if (defs.length >= 4) break;
-    }
-
-    if (defs.length === 0 && entry.shortdef?.length) {
-      for (const d of entry.shortdef.slice(0, 4)) {
-        if (d?.trim()) defs.push({ definition: d.trim() });
-      }
-    }
-
-    if (!defs.length) continue;
-    const existing = byPos.get(pos) || [];
-    for (const d of defs) {
-      if (existing.length >= 4) break;
-      if (existing.some((x) => x.definition === d.definition)) continue;
-      existing.push(d);
-    }
-    byPos.set(pos, existing);
-  }
-
-  if (byPos.size === 0) return null;
-
-  const first = entries[0];
-  const synonyms = [
-    ...new Set(
-      (first.meta?.syns || []).flat().filter((s) => typeof s === "string")
-    ),
-  ].slice(0, 16);
-
-  const meanings = [...byPos.entries()].map(([partOfSpeech, definitions]) => ({
-    partOfSpeech,
-    definitions,
-    synonyms: partOfSpeech === [...byPos.keys()][0] ? synonyms : [],
-  }));
-
-  return {
-    word: first.hwi?.hw?.replace(/\*/g, "") || first.meta?.id?.split(":")[0] || word,
-    phonetic: first.hwi?.prs?.find((p) => p.mw)?.mw || undefined,
-    meanings,
-    source: "merriam-webster",
-  };
-}
-
-async function fetchFreeEnglishDict(word: string): Promise<EnglishDictEntry | null> {
+async function fetchEnglishDict(word: string) {
   const res = await fetchWithTimeout(
     `https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(word)}`,
-    6_000
+    10_000
   );
   if (res.status === 404) return null;
   if (!res.ok) throw new Error("en_unavailable");
-  const raw = (await res.json()) as EnglishDictEntry[];
-  const entry = raw[0] || null;
-  if (!entry) return null;
-  return { ...entry, source: "free" };
+  const raw = (await res.json()) as Array<{
+    word?: string;
+    phonetic?: string;
+    phonetics?: { text?: string }[];
+    meanings?: Array<{
+      partOfSpeech?: string;
+      definitions?: Array<{
+        definition?: string;
+        example?: string;
+        synonyms?: string[];
+      }>;
+      synonyms?: string[];
+    }>;
+    sourceUrls?: string[];
+  }>;
+  return raw[0] || null;
 }
 
-async function fetchEnglishDict(word: string): Promise<EnglishDictEntry | null> {
+async function fetchMerriamWebster(word: string) {
+  const apiKey = process.env.MERRIAM_WEBSTER_API_KEY;
+  if (!apiKey) return null;
+  
   try {
-    const mw = await fetchMerriamWebster(word);
-    if (mw) return mw;
+    const res = await fetchWithTimeout(
+      `https://www.dictionaryapi.com/api/v3/references/collegiate/json/${encodeURIComponent(word)}?key=${apiKey}`,
+      10_000
+    );
+    if (res.status === 404) return null;
+    if (!res.ok) return null;
+    
+    const raw = (await res.json()) as Array<{
+      meta?: { id?: string };
+      hwi?: { hw?: string; prs?: Array<{ mw?: string }> };
+      fl?: string;
+      shortdef?: string[];
+      def?: Array<{
+        sseq?: Array<Array<Array<string | { dt?: Array<[string, string]> }>>>;
+      }>;
+    }>;
+    
+    if (!raw || raw.length === 0 || typeof raw[0] === 'string') return null;
+    
+    return raw;
   } catch {
-    // Fall through to free dictionary
+    return null;
   }
-  return fetchFreeEnglishDict(word);
+}
+
+async function fetchWordnik(word: string) {
+  const apiKey = process.env.WORDNIK_API_KEY;
+  if (!apiKey) return null;
+  
+  try {
+    const res = await fetchWithTimeout(
+      `https://api.wordnik.com/v4/word.json/${encodeURIComponent(word)}/definitions?limit=10&includeRelated=false&useCanonical=true&includeTags=false&api_key=${apiKey}`,
+      10_000
+    );
+    if (res.status === 404) return null;
+    if (!res.ok) return null;
+    
+    const raw = (await res.json()) as Array<{
+      word?: string;
+      partOfSpeech?: string;
+      text?: string;
+      attributionText?: string;
+    }>;
+    
+    return raw && raw.length > 0 ? raw : null;
+  } catch {
+    return null;
+  }
 }
 
 async function fetchBanglaBundle(word: string) {
   const res = await fetchWithTimeout(
     `https://dictionary.zone.id/api.php?word=${encodeURIComponent(word)}`,
-    7_000,
-    {
-      headers: {
-        Accept: "application/json",
-        "User-Agent": "Flowdesk/1.0",
-      },
-    }
+    10_000
   );
   if (!res.ok) return null;
   return (await res.json()) as {
@@ -426,7 +169,7 @@ async function fetchBanglaBundle(word: string) {
   };
 }
 
-function toEnMeanings(entry: NonNullable<Awaited<ReturnType<typeof fetchEnglishDict>>>) {
+function toEnMeanings(entry: NonNullable<Awaited<ReturnType<typeof fetchEnglishDict>>>, source = "Free Dictionary") {
   return (entry.meanings || []).map((m) => {
     const fromDefs = (m.definitions || []).flatMap((d) => d.synonyms || []);
     const syns = [...new Set([...(m.synonyms || []), ...fromDefs])].slice(0, 16);
@@ -437,11 +180,114 @@ function toEnMeanings(entry: NonNullable<Awaited<ReturnType<typeof fetchEnglishD
         .map((d) => ({
           definition: d.definition || "",
           example: d.example,
+          source,
         }))
         .filter((d) => d.definition),
       synonyms: syns,
+      source,
     };
   });
+}
+
+function parseMerriamWebster(entries: NonNullable<Awaited<ReturnType<typeof fetchMerriamWebster>>>) {
+  const meanings: DictMeaning[] = [];
+  
+  for (const entry of entries.slice(0, 3)) {
+    if (!entry.fl) continue;
+    
+    const definitions: { definition: string; example?: string; source?: string }[] = [];
+    
+    if (entry.shortdef) {
+      definitions.push(
+        ...entry.shortdef.slice(0, 3).map((def) => ({
+          definition: def,
+          source: "Merriam-Webster",
+        }))
+      );
+    }
+    
+    if (definitions.length > 0) {
+      meanings.push({
+        partOfSpeech: entry.fl,
+        definitions,
+        synonyms: [],
+        source: "Merriam-Webster",
+      });
+    }
+  }
+  
+  return meanings;
+}
+
+function parseWordnik(entries: NonNullable<Awaited<ReturnType<typeof fetchWordnik>>>) {
+  const grouped = new Map<string, typeof entries>();
+  
+  for (const entry of entries) {
+    const pos = entry.partOfSpeech || "—";
+    if (!grouped.has(pos)) grouped.set(pos, []);
+    grouped.get(pos)!.push(entry);
+  }
+  
+  const meanings: DictMeaning[] = [];
+  
+  for (const [pos, defs] of grouped.entries()) {
+    meanings.push({
+      partOfSpeech: pos,
+      definitions: defs.slice(0, 3).map((d) => ({
+        definition: d.text || "",
+        source: d.attributionText || "Wordnik",
+      })),
+      synonyms: [],
+      source: "Wordnik",
+    });
+  }
+  
+  return meanings;
+}
+
+function mergeMeanings(meaningsList: DictMeaning[][]) {
+  const merged: DictMeaning[] = [];
+  const posMap = new Map<string, DictMeaning>();
+  
+  for (const meanings of meaningsList) {
+    for (const meaning of meanings) {
+      const pos = meaning.partOfSpeech;
+      
+      if (!posMap.has(pos)) {
+        posMap.set(pos, {
+          partOfSpeech: pos,
+          definitions: [],
+          synonyms: [],
+        });
+      }
+      
+      const existing = posMap.get(pos)!;
+      
+      for (const def of meaning.definitions) {
+        const isDuplicate = existing.definitions.some(
+          (d) => d.definition.toLowerCase() === def.definition.toLowerCase()
+        );
+        if (!isDuplicate) {
+          existing.definitions.push(def);
+        }
+      }
+      
+      for (const syn of meaning.synonyms) {
+        if (!existing.synonyms.includes(syn)) {
+          existing.synonyms.push(syn);
+        }
+      }
+    }
+  }
+  
+  merged.push(...posMap.values());
+  
+  for (const meaning of merged) {
+    meaning.definitions = meaning.definitions.slice(0, 8);
+    meaning.synonyms = meaning.synonyms.slice(0, 16);
+  }
+  
+  return merged;
 }
 
 export async function GET(req: Request) {
@@ -474,36 +320,56 @@ export async function GET(req: Request) {
 
   try {
     if (lang === "en" && !isBanglaScript) {
-      const [entry, bnBundle] = await Promise.all([
+      const [entry, mwEntries, wordnikEntries] = await Promise.all([
         fetchEnglishDict(qEn),
-        fetchBanglaBundle(qEn),
+        fetchMerriamWebster(qEn).catch(() => null),
+        fetchWordnik(qEn).catch(() => null),
       ]);
-      if (!entry) {
+      
+      const allMeanings: DictMeaning[][] = [];
+      const sources: string[] = [];
+      
+      if (entry) {
+        allMeanings.push(toEnMeanings(entry, "Free Dictionary"));
+        sources.push("Free Dictionary");
+      }
+      
+      if (mwEntries) {
+        const mwMeanings = parseMerriamWebster(mwEntries);
+        if (mwMeanings.length > 0) {
+          allMeanings.push(mwMeanings);
+          sources.push("Merriam-Webster");
+        }
+      }
+      
+      if (wordnikEntries) {
+        const wordnikMeanings = parseWordnik(wordnikEntries);
+        if (wordnikMeanings.length > 0) {
+          allMeanings.push(wordnikMeanings);
+          sources.push("Wordnik");
+        }
+      }
+      
+      if (allMeanings.length === 0) {
         return NextResponse.json(
           { error: "No entry found", word: qEn },
           { status: 404 }
         );
       }
-      const bangla = parseBanglaGlosses(bnBundle?.bangla_translation2 || "");
-      const meanings = toEnMeanings(entry);
-      const englishSynonyms = collectEnglishSynonyms(bnBundle, entry, qEn);
-      const [forwardCross, reverseCross] = await Promise.all([
-        buildCrossSynonyms(englishSynonyms, bangla),
-        buildReverseCrossSynonyms(bangla),
-      ]);
+      
+      const meanings = mergeMeanings(allMeanings);
+      
       const phonetic =
-        entry.phonetic ||
-        entry.phonetics?.find((p) => p.text)?.text ||
-        bnBundle?.english_pronunciation?.phonetic ||
+        entry?.phonetic ||
+        entry?.phonetics?.find((p) => p.text)?.text ||
         null;
+        
       const payload: DictResult = {
-        word: entry.word || qEn,
+        word: entry?.word || qEn,
         phonetic,
         lang: "en",
-        meanings: attachMeaningSynonyms(meanings, englishSynonyms),
-        bangla: bangla.length ? bangla : undefined,
-        englishSynonyms,
-        crossSynonyms: mergeCrossSynonyms(forwardCross, reverseCross),
+        meanings,
+        sources: sources.length > 1 ? sources : undefined,
       };
       return NextResponse.json(payload, {
         headers: {
@@ -517,7 +383,7 @@ export async function GET(req: Request) {
     let englishGloss: string | null = null;
 
     if (isBanglaScript) {
-      englishGloss = await translateText(rawQ, "bn", "en");
+      englishGloss = await translateGtx(rawQ, "bn", "en");
       // Strip leading articles for dictionary lookup
       lookupWord = (englishGloss || "")
         .toLowerCase()
@@ -568,8 +434,9 @@ export async function GET(req: Request) {
           ? toEnMeanings(enEntry)
           : [];
 
-    if (bangla.length === 0 && lookupWord) {
-      const mt = await translateText(lookupWord, "en", "bn");
+    if (!bangla.length && !meanings.length) {
+      // Last resort: EN→BN machine translation of the English word
+      const mt = await translateGtx(lookupWord, "en", "bn");
       if (mt) bangla.push({ text: mt });
     }
 
@@ -579,16 +446,6 @@ export async function GET(req: Request) {
         { status: 404 }
       );
     }
-
-    const englishSynonyms = collectEnglishSynonyms(
-      bnBundle,
-      enEntry,
-      lookupWord
-    );
-    const [forwardCross, reverseCross] = await Promise.all([
-      buildCrossSynonyms(englishSynonyms, bangla),
-      buildReverseCrossSynonyms(bangla),
-    ]);
 
     const phonetic =
       bnBundle?.english_pronunciation?.phonetic ||
@@ -600,21 +457,29 @@ export async function GET(req: Request) {
       word: isBanglaScript ? rawQ : bnBundle?.word || enEntry?.word || lookupWord,
       phonetic,
       lang: "bn",
-      meanings: attachMeaningSynonyms(meanings, englishSynonyms),
+      meanings,
       bangla,
-      englishSynonyms,
-      crossSynonyms: mergeCrossSynonyms(forwardCross, reverseCross),
       englishGloss: isBanglaScript
         ? englishGloss || lookupWord
         : null,
     };
+
+    // Attach English synonyms as insertable chips when useful
+    if (enEntry && payload.meanings[0] && !payload.meanings[0].synonyms.length) {
+      const syns = toEnMeanings(enEntry).flatMap((m) => m.synonyms).slice(0, 12);
+      if (syns.length) payload.meanings[0].synonyms = syns;
+    }
 
     return NextResponse.json(payload, {
       headers: {
         "Cache-Control": "private, s-maxage=86400, stale-while-revalidate=604800",
       },
     });
-  } catch {
-    return NextResponse.json({ error: "Dictionary lookup failed" }, { status: 500 });
+  } catch (err) {
+    console.error("Dictionary lookup error:", err);
+    return NextResponse.json(
+      { error: "Dictionary lookup failed. Please check your connection and try again." },
+      { status: 500 }
+    );
   }
 }

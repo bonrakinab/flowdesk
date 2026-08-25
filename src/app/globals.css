@@ -267,6 +267,8 @@ select.field-control {
 .ProseMirror {
   outline: none;
   min-height: 280px;
+  word-break: normal;
+  overflow-wrap: break-word;
 }
 .ProseMirror p.is-editor-empty:first-child::before {
   color: var(--muted);
@@ -296,6 +298,20 @@ select.field-control {
 .ProseMirror p {
   margin: 0.4rem 0;
   line-height: 1.65;
+  word-break: normal;
+  overflow-wrap: break-word;
+}
+
+/* Mobile-specific fixes for notes editor */
+@media (max-width: 768px) {
+  .prose {
+    word-break: normal !important;
+    overflow-wrap: break-word !important;
+  }
+  .prose p {
+    word-break: normal !important;
+    overflow-wrap: break-word !important;
+  }
 }
 
 @keyframes hourglass-flip {

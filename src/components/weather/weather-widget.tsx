@@ -11,6 +11,8 @@ import {
   CloudSun,
   Droplets,
   MapPin,
+  Moon,
+  MoonStar,
   RefreshCw,
   Snowflake,
   Sun,
@@ -48,9 +50,25 @@ const CACHE_KEY = "flowdesk-weather-cache";
 const WEATHER_FRESH_MS = 10 * 60_000;
 const COORDS_FRESH_MS = 30 * 60_000;
 
+function isCacheStale(cache: WeatherCache): boolean {
+  // Cache is stale if isDay state might have changed (6+ hours old)
+  const age = Date.now() - cache.fetchedAt;
+  if (age > 6 * 60 * 60_000) return true;
+  
+  // Also invalidate if we're near sunrise/sunset (±1 hour)
+  const hour = new Date().getHours();
+  const isSunriseSunsetTime = (hour >= 5 && hour <= 7) || (hour >= 17 && hour <= 19);
+  if (isSunriseSunsetTime && age > 30 * 60_000) return true;
+  
+  return false;
+}
+
 const ICONS: Record<string, typeof Sun> = {
   sun: Sun,
+  moon: Moon,
+  "moon-star": MoonStar,
   "cloud-sun": CloudSun,
+  "cloud-moon": Cloud,
   cloud: Cloud,
   "cloud-fog": CloudFog,
   "cloud-drizzle": CloudDrizzle,
@@ -127,18 +145,23 @@ export function WeatherWidget({ className }: { className?: string }) {
       setError("");
 
       const cached = readCache();
-      if (!forceRefresh && cached?.data && !data) {
+      
+      // Invalidate cache if it's stale due to potential day/night change
+      const cacheIsStale = cached ? isCacheStale(cached) : false;
+      
+      if (!forceRefresh && cached?.data && !data && !cacheIsStale) {
         setData(cached.data);
         setLoading(false);
       }
 
       const coordsFresh =
         cached &&
+        !cacheIsStale &&
         Date.now() - cached.fetchedAt < COORDS_FRESH_MS &&
         Number.isFinite(cached.lat) &&
         Number.isFinite(cached.lon);
 
-      if (!forceRefresh && coordsFresh) {
+      if (!forceRefresh && coordsFresh && !cacheIsStale) {
         const weatherFresh = Date.now() - cached!.fetchedAt < WEATHER_FRESH_MS;
         if (weatherFresh && cached!.data) {
           setData(cached!.data);
@@ -160,7 +183,7 @@ export function WeatherWidget({ className }: { className?: string }) {
 
       const result = await getDeviceLocation({ forceRefresh });
       if (!result.ok) {
-        if (cached?.data) {
+        if (cached?.data && !cacheIsStale) {
           setData(cached.data);
           setError("");
         } else {
@@ -184,6 +207,26 @@ export function WeatherWidget({ className }: { className?: string }) {
   }, []);
 
   const Icon = data ? ICONS[data.icon] || Cloud : Cloud;
+  
+  const displayIcon = data?.icon === "sun" && data?.isDay === false
+    ? "moon" 
+    : data?.icon === "cloud-sun" && data?.isDay === false
+    ? "cloud-moon"
+    : data?.icon || "cloud";
+  
+  const IconComponent = data ? ICONS[displayIcon] || Cloud : Cloud;
+  
+  // Debug: Log the weather state
+  useEffect(() => {
+    if (data) {
+      console.log('Weather Debug:', {
+        icon: data.icon,
+        isDay: data.isDay,
+        displayIcon,
+        time: data.updatedAt,
+      });
+    }
+  }, [data, displayIcon]);
   const advice = data
     ? getWeatherAdvice({
         icon: data.icon,
@@ -204,7 +247,7 @@ export function WeatherWidget({ className }: { className?: string }) {
       )}
     >
       {data ? (
-        <WeatherAtmosphere icon={data.icon} isDay={data.isDay} />
+        <WeatherAtmosphere icon={displayIcon} isDay={data.isDay} />
       ) : (
         <div
           aria-hidden
@@ -283,7 +326,7 @@ export function WeatherWidget({ className }: { className?: string }) {
               <div className="flex items-end justify-between gap-3">
                 <div className="flex items-center gap-3">
                   <div className="grid h-12 w-12 place-items-center rounded-2xl bg-white/80 text-sky-600 shadow-sm backdrop-blur-sm dark:bg-white/10 dark:text-sky-300">
-                    <Icon size={24} />
+                    <IconComponent size={24} />
                   </div>
                   <div>
                     <div className="font-[family-name:var(--font-display)] text-3xl leading-none tracking-tight">

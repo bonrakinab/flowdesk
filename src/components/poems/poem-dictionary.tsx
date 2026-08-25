@@ -10,9 +10,11 @@ type DictResult = {
   lang: "en" | "bn";
   meanings: {
     partOfSpeech: string;
-    definitions: { definition: string; example?: string }[];
+    definitions: { definition: string; example?: string; source?: string }[];
     synonyms: string[];
+    source?: string;
   }[];
+  sources?: string[];
   bangla?: { text: string; partOfSpeech?: string }[];
   englishGloss?: string | null;
   englishSynonyms?: string[];
@@ -53,23 +55,45 @@ export function PoemDictionary({
       setQ(cleaned);
       setLoading(true);
       setError("");
-      try {
-        const res = await fetch(
-          `/api/dictionary?q=${encodeURIComponent(cleaned)}&lang=${which}`
-        );
-        const json = await res.json();
-        if (!res.ok) {
-          setResult(null);
-          setError(json.error || "Not found");
-        } else {
-          setResult(json);
+      
+      let retries = 0;
+      const maxRetries = 2;
+      
+      while (retries <= maxRetries) {
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 15000);
+          
+          const res = await fetch(
+            `/api/dictionary?q=${encodeURIComponent(cleaned)}&lang=${which}`,
+            { signal: controller.signal }
+          );
+          
+          clearTimeout(timeoutId);
+          
+          const json = await res.json();
+          if (!res.ok) {
+            setResult(null);
+            setError(json.error || "Not found");
+          } else {
+            setResult(json);
+          }
+          break;
+        } catch (err) {
+          retries++;
+          if (retries > maxRetries) {
+            setResult(null);
+            setError("Network error. Please check your connection and try again.");
+          } else {
+            await new Promise(resolve => setTimeout(resolve, 1000 * retries));
+          }
+        } finally {
+          if (retries > maxRetries) {
+            setLoading(false);
+          }
         }
-      } catch {
-        setResult(null);
-        setError("Lookup failed");
-      } finally {
-        setLoading(false);
       }
+      setLoading(false);
     },
     [lang]
   );
@@ -186,6 +210,11 @@ export function PoemDictionary({
                   {result.phonetic}
                 </div>
               )}
+              {result.sources && result.sources.length > 1 && (
+                <div className="mt-1 text-[10px] text-stone-500">
+                  Sources: {result.sources.join(", ")}
+                </div>
+              )}
             </div>
 
             {result.bangla && result.bangla.length > 0 && (
@@ -284,6 +313,11 @@ export function PoemDictionary({
                   {m.definitions.map((d, j) => (
                     <li key={j} className="leading-relaxed">
                       {d.definition}
+                      {d.source && (
+                        <span className="ml-1.5 text-[10px] text-stone-500">
+                          [{d.source}]
+                        </span>
+                      )}
                       {d.example && (
                         <div className="mt-0.5 text-xs italic text-stone-600">
                           “{d.example}”

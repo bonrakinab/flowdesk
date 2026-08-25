@@ -19,6 +19,7 @@ import {
   Pill,
   Feather,
   Bot,
+  Activity,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useSession } from "next-auth/react";
@@ -39,6 +40,7 @@ const primary = [
 
 const more = [
   { href: "/agent", label: "Agent", icon: Bot },
+  { href: "/health", label: "Health", icon: Activity },
   { href: "/list", label: "List", icon: List },
   { href: "/inbox", label: "Inbox", icon: Inbox },
   { href: "/poems", label: "Poems", icon: Feather },
@@ -190,6 +192,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               "flex flex-col items-center gap-0.5 rounded-lg py-2 text-[10px]",
               pathname.startsWith("/more") ||
                 pathname.startsWith("/agent") ||
+                pathname.startsWith("/health") ||
                 pathname.startsWith("/inbox") ||
                 pathname.startsWith("/poems") ||
                 pathname.startsWith("/list") ||
