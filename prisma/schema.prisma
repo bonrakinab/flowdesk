@@ -75,6 +75,8 @@ model User {
   tzOffsetMinutes  Int?
   focusTicketIds   String?
   reminders        Reminder[]
+  fitnessConnections FitnessConnection[]
+  fitnessData      FitnessData[]
 }
 
 model Account {
@@ -537,4 +539,57 @@ model MedDoseLog {
   user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([medicationId, scheduledFor])
+}
+
+/// Google Health API connection status per user
+model FitnessConnection {
+  id             String    @id @default(cuid())
+  userId         String
+  provider       String    @default("google_health") // google_health, fitbit, etc.
+  accessToken    String
+  refreshToken   String
+  expiresAt      DateTime
+  scope          String?
+  lastSyncAt     DateTime?
+  syncEnabled    Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, provider])
+  @@index([userId])
+}
+
+/// Daily aggregated fitness data from Google Health API
+model FitnessData {
+  id            String   @id @default(cuid())
+  userId        String
+  date          DateTime // Date only (start of day)
+  provider      String   @default("google_health")
+  
+  // Activity metrics
+  steps         Int?
+  distance      Float?   // meters
+  calories      Float?   // kcal
+  activeMinutes Int?
+  
+  // Heart rate (daily averages)
+  heartRateAvg  Float?   // bpm
+  heartRateMin  Float?   // bpm
+  heartRateMax  Float?   // bpm
+  
+  // Sleep
+  sleepMinutes  Int?
+  
+  // Raw JSON data from API for future extensibility
+  rawData       String?
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, date, provider])
+  @@index([userId, date])
 }
