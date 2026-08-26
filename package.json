@@ -16,7 +16,7 @@
     "db:seed": "tsx prisma/seed.ts",
     "db:reset": "prisma migrate reset --force",
     "postinstall": "DATABASE_URL=${DATABASE_URL:-postgresql://preview:preview@localhost:5432/preview} DATABASE_URL_UNPOOLED=${DATABASE_URL_UNPOOLED:-postgresql://preview:preview@localhost:5432/preview} prisma generate",
-    "vercel-build": "DATABASE_URL=${DATABASE_URL:-postgresql://preview:preview@localhost:5432/preview} DATABASE_URL_UNPOOLED=${DATABASE_URL_UNPOOLED:-postgresql://preview:preview@localhost:5432/preview} next build",
+    "vercel-build": "DATABASE_URL=${DATABASE_URL:-postgresql://preview:preview@localhost:5432/preview} DATABASE_URL_UNPOOLED=${DATABASE_URL_UNPOOLED:-postgresql://preview:preview@localhost:5432/preview} AUTH_SECRET=${AUTH_SECRET:-diagnostic-preview-secret} AUTH_TRUST_HOST=${AUTH_TRUST_HOST:-true} AUTH_URL=${AUTH_URL:-https://preview.example.com} NEXTAUTH_URL=${NEXTAUTH_URL:-https://preview.example.com} DISABLE_SERWIST=true next build",
     "alerts:tick": "node --env-file=.env scripts/alerts-tick.mjs",
     "android:sync": "node scripts/android-sync.mjs",
     "android:open": "npx cap open android",
