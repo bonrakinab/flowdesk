@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db";
 import { collectDueAlerts, type DueAlert } from "@/lib/alerts";
 import { sendPushToUser, isPushConfigured } from "@/lib/push";
 import { appBaseUrl } from "@/lib/app-url";
+import { isSmtpConfigured, sendMail } from "@/lib/mail";
 
 async function alreadySent(
   userId: string,
@@ -30,7 +31,7 @@ async function markSent(
   });
 }
 
-/** Push only — email/SMS disabled; in-app toasts handled by ReminderWatcher. */
+/** Push + email delivery; in-app toasts are handled by ReminderWatcher. */
 export async function dispatchAlertsForUser(user: {
   id: string;
   email: string;
@@ -51,6 +52,7 @@ export async function dispatchAlertsForUser(user: {
   });
 
   let push = 0;
+  let email = 0;
   const baseUrl = appBaseUrl();
 
   if (isPushConfigured()) {
@@ -68,10 +70,36 @@ export async function dispatchAlertsForUser(user: {
     }
   }
 
+  if (user.alertEmail && isSmtpConfigured()) {
+    for (const a of alerts) {
+      if (await alreadySent(user.id, a.id, "email")) continue;
+      const href = a.href ? `${baseUrl}${a.href}` : `${baseUrl}/today`;
+      const when = new Date(a.at).toLocaleString("en-CA", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      });
+      const mail = await sendMail({
+        to: user.email,
+        subject: `Flowdesk · ${a.title}`,
+        html: `<div style="font-family:Arial,sans-serif;max-width:560px;margin:auto">
+          <h2 style="margin-bottom:6px">${a.title}</h2>
+          <p style="font-size:16px">${a.body}</p>
+          <p style="color:#78716c;font-size:13px">${when}</p>
+          <p><a href="${href}">Open in Flowdesk</a></p>
+        </div>`,
+        text: `${a.title}\n${a.body}\n${when}\n${href}`,
+      });
+      if (mail.ok) {
+        email += 1;
+        await markSent(user.id, a.id, "email");
+      }
+    }
+  }
+
   return {
     alerts: alerts.length,
     push,
-    email: 0,
+    email,
     sms: 0,
     items: alerts as DueAlert[],
   };
@@ -81,7 +109,7 @@ export async function dispatchAlertsForAllUsers() {
   const users = await prisma.user.findMany({
     where: {
       householdId: { not: null },
-      pushSubs: { some: {} },
+      OR: [{ pushSubs: { some: {} } }, { alertEmail: true }],
     },
     select: {
       id: true,
@@ -94,11 +122,13 @@ export async function dispatchAlertsForAllUsers() {
   });
 
   let push = 0;
+  let email = 0;
   let alerts = 0;
   for (const u of users) {
     const r = await dispatchAlertsForUser(u);
     push += r.push;
+    email += r.email;
     alerts += r.alerts;
   }
-  return { users: users.length, alerts, push, email: 0, sms: 0 };
+  return { users: users.length, alerts, push, email, sms: 0 };
 }
