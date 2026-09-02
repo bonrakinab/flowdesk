@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
-import { requireHousehold } from "@/lib/session";
-import { dispatchAlertsForUser } from "@/lib/alert-dispatch";
+import { requireUser } from "@/lib/session";
 import { prisma } from "@/lib/db";
+import { dispatchDailyDigestForUser } from "@/lib/daily-digest";
 
 export async function POST() {
-  const result = await requireHousehold();
+  const result = await requireUser();
   if ("error" in result && result.error) return result.error;
   const { user } = result as { user: { id: string } };
 
@@ -13,17 +13,24 @@ export async function POST() {
     select: {
       id: true,
       email: true,
+      name: true,
       householdId: true,
       alertEmail: true,
-      alertSms: true,
-      phone: true,
       tzOffsetMinutes: true,
     },
   });
+
   if (!full) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const summary = await dispatchAlertsForUser(full);
-  return NextResponse.json(summary);
+  const digest = await dispatchDailyDigestForUser(full, { force: true });
+  if (!digest.sent) {
+    return NextResponse.json(
+      { ok: false, ...digest },
+      { status: digest.error ? 502 : 400 }
+    );
+  }
+
+  return NextResponse.json({ ok: true, ...digest });
 }
