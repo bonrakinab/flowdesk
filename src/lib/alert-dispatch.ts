@@ -52,15 +52,18 @@ async function markSent(
 }
 
 /** Push + email delivery; in-app toasts are handled by ReminderWatcher. */
-export async function dispatchAlertsForUser(user: {
-  id: string;
-  email: string;
-  householdId: string | null;
-  alertEmail?: boolean;
-  alertSms?: boolean;
-  phone?: string | null;
-  tzOffsetMinutes?: number | null;
-}) {
+export async function dispatchAlertsForUser(
+  user: {
+    id: string;
+    email: string;
+    householdId: string | null;
+    alertEmail?: boolean;
+    alertSms?: boolean;
+    phone?: string | null;
+    tzOffsetMinutes?: number | null;
+  },
+  options: { email?: boolean } = {}
+) {
   if (!user.householdId) {
     return { alerts: 0, push: 0, email: 0, sms: 0 };
   }
@@ -91,7 +94,7 @@ export async function dispatchAlertsForUser(user: {
     }
   }
 
-  if (user.alertEmail && isSmtpConfigured()) {
+  if (options.email !== false && user.alertEmail && isSmtpConfigured()) {
     for (const a of alerts) {
       if (await alreadySent(user.id, a.id, "email")) continue;
       const href = a.href ? `${baseUrl}${a.href}` : `${baseUrl}/today`;
@@ -125,7 +128,9 @@ export async function dispatchAlertsForUser(user: {
   };
 }
 
-export async function dispatchAlertsForAllUsers() {
+export async function dispatchAlertsForAllUsers(
+  options: { email?: boolean } = {}
+) {
   const users = await prisma.user.findMany({
     where: {
       householdId: { not: null },
@@ -146,7 +151,7 @@ export async function dispatchAlertsForAllUsers() {
   let email = 0;
   let alerts = 0;
   for (const u of users) {
-    const r = await dispatchAlertsForUser(u);
+    const r = await dispatchAlertsForUser(u, options);
     push += r.push;
     email += r.email;
     alerts += r.alerts;
