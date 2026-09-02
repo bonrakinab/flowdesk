@@ -347,12 +347,74 @@ export default function AccountPage() {
         <Panel>
           <PanelHeader
             title="Alerts"
-            description="In-app and browser notifications for reminders, events, tickets, and meds."
+            description="In-app, browser, and email alerts for reminders, events, tickets, and meds."
           />
           <div className="space-y-3 text-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border/70 bg-white/50 p-3 dark:bg-white/5">
+              <div className="min-w-0">
+                <div className="font-medium">Email alerts & daily brief</div>
+                <p className="mt-0.5 text-xs text-muted">
+                  Due alerts plus a morning summary of today’s tickets, events,
+                  reminders, and medication are sent to {account?.email}.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={account?.alertEmail ? "soft" : "secondary"}
+                  onClick={async () => {
+                    if (!account) return;
+                    setNotifyMsg("");
+                    const next = !Boolean(account.alertEmail);
+                    const res = await fetch("/api/account", {
+                      method: "PATCH",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ alertEmail: next }),
+                    });
+                    if (res.ok) {
+                      await load();
+                      setNotifyMsg(
+                        next
+                          ? `Email alerts enabled for ${account.email}`
+                          : "Email alerts disabled"
+                      );
+                    } else {
+                      const data = await res.json().catch(() => ({}));
+                      setNotifyMsg(data.error || "Could not update email alerts");
+                    }
+                  }}
+                >
+                  {account?.alertEmail ? "Email alerts on" : "Enable email alerts"}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  onClick={async () => {
+                    setNotifyMsg("Sending today’s brief…");
+                    const res = await fetch("/api/notify/daily-digest", {
+                      method: "POST",
+                    });
+                    const data = await res.json().catch(() => ({}));
+                    if (res.ok) {
+                      setNotifyMsg(`Today’s brief sent to ${account?.email || "your email"}`);
+                    } else if (data.skipped === "empty") {
+                      setNotifyMsg("Nothing is scheduled today, so no brief was sent.");
+                    } else if (data.skipped === "smtp-not-configured") {
+                      setNotifyMsg("Email is not configured on the server yet.");
+                    } else {
+                      setNotifyMsg(data.error || "Could not send today’s brief");
+                    }
+                  }}
+                >
+                  Send today’s brief
+                </Button>
+              </div>
+            </div>
             <p className="text-xs text-muted">
-              Allow notifications so due items show as toasts and pop-ups while
-              Flowdesk is open (or in another tab).
+              Allow browser notifications so due items also show as toasts and
+              pop-ups while Flowdesk is open (or in another tab).
             </p>
             <div className="flex flex-wrap gap-2">
               <Button
