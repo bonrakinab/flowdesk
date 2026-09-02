@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { dispatchAlertsForAllUsers } from "@/lib/alert-dispatch";
+import { dispatchDailyDigestsForAllUsers } from "@/lib/daily-digest";
 
 /**
  * Background tick for push/email/SMS when the browser may be closed.
@@ -15,6 +16,9 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const summary = await dispatchAlertsForAllUsers();
-  return NextResponse.json({ ok: true, ...summary });
+  const [alerts, digest] = await Promise.all([
+    dispatchAlertsForAllUsers({ email: false }),
+    dispatchDailyDigestsForAllUsers(),
+  ]);
+  return NextResponse.json({ ok: true, alerts, digest });
 }
