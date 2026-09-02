@@ -4,6 +4,26 @@ import { sendPushToUser, isPushConfigured } from "@/lib/push";
 import { appBaseUrl } from "@/lib/app-url";
 import { isSmtpConfigured, sendMail } from "@/lib/mail";
 
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function formatAlertTime(iso: string, tzOffsetMinutes?: number | null) {
+  const value = new Date(iso);
+  const offset = Number.isFinite(tzOffsetMinutes) ? Number(tzOffsetMinutes) : 0;
+  const wall = new Date(value.getTime() - offset * 60_000);
+  return wall.toLocaleString("en-CA", {
+    timeZone: "UTC",
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+}
+
 async function alreadySent(
   userId: string,
   alertKey: string,
@@ -39,6 +59,7 @@ export async function dispatchAlertsForUser(user: {
   alertEmail?: boolean;
   alertSms?: boolean;
   phone?: string | null;
+  tzOffsetMinutes?: number | null;
 }) {
   if (!user.householdId) {
     return { alerts: 0, push: 0, email: 0, sms: 0 };
@@ -74,16 +95,15 @@ export async function dispatchAlertsForUser(user: {
     for (const a of alerts) {
       if (await alreadySent(user.id, a.id, "email")) continue;
       const href = a.href ? `${baseUrl}${a.href}` : `${baseUrl}/today`;
-      const when = new Date(a.at).toLocaleString("en-CA", {
-        dateStyle: "medium",
-        timeStyle: "short",
-      });
+      const when = formatAlertTime(a.at, user.tzOffsetMinutes);
+      const safeTitle = escapeHtml(a.title);
+      const safeBody = escapeHtml(a.body);
       const mail = await sendMail({
         to: user.email,
         subject: `Flowdesk · ${a.title}`,
         html: `<div style="font-family:Arial,sans-serif;max-width:560px;margin:auto">
-          <h2 style="margin-bottom:6px">${a.title}</h2>
-          <p style="font-size:16px">${a.body}</p>
+          <h2 style="margin-bottom:6px">${safeTitle}</h2>
+          <p style="font-size:16px">${safeBody}</p>
           <p style="color:#78716c;font-size:13px">${when}</p>
           <p><a href="${href}">Open in Flowdesk</a></p>
         </div>`,
@@ -118,6 +138,7 @@ export async function dispatchAlertsForAllUsers() {
       alertEmail: true,
       alertSms: true,
       phone: true,
+      tzOffsetMinutes: true,
     },
   });
 
