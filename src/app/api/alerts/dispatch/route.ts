@@ -17,6 +17,7 @@ export async function POST() {
       alertEmail: true,
       alertSms: true,
       phone: true,
+      tzOffsetMinutes: true,
     },
   });
   if (!full) {
