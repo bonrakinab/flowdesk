@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db";
 import { appBaseUrl } from "@/lib/app-url";
 import { buildTodayDoses, wallDayFor } from "@/lib/meds";
 import { isSmtpConfigured, sendMail } from "@/lib/mail";
+import type { Prisma } from "@prisma/client";
 
 type DigestUser = {
   id: string;
@@ -89,7 +90,8 @@ export async function dispatchDailyDigestForUser(
   options: { force?: boolean } = {}
 ): Promise<DigestResult> {
   if (!user.alertEmail && !options.force) return { sent: false, skipped: "disabled" };
-  if (!user.householdId) return { sent: false, skipped: "no-household" };
+  const householdId = user.householdId;
+  if (!householdId) return { sent: false, skipped: "no-household" };
   if (!isSmtpConfigured()) return { sent: false, skipped: "smtp-not-configured" };
 
   const now = new Date();
@@ -109,7 +111,7 @@ export async function dispatchDailyDigestForUser(
     if (existing) return { sent: false, skipped: "duplicate", dayKey };
   }
 
-  const assignmentScope = [
+  const assignmentScope: Prisma.TicketWhereInput[] = [
     { assigneeId: user.id },
     { assigneeId: null },
     { assignees: { some: { userId: user.id } } },
@@ -118,7 +120,7 @@ export async function dispatchDailyDigestForUser(
   const [tickets, events, reminders, meds] = await Promise.all([
     prisma.ticket.findMany({
       where: {
-        householdId: user.householdId,
+        householdId,
         status: { not: "Done" },
         AND: [
           { OR: assignmentScope },
@@ -143,7 +145,7 @@ export async function dispatchDailyDigestForUser(
     }),
     prisma.calendarEvent.findMany({
       where: {
-        householdId: user.householdId,
+        householdId,
         status: { not: "done" },
         startAt: { lt: end },
         endAt: { gte: start },
@@ -164,13 +166,13 @@ export async function dispatchDailyDigestForUser(
         done: false,
         remindAt: { gte: start, lt: end },
         OR: [
-          { ticket: { householdId: user.householdId } },
-          { event: { householdId: user.householdId } },
+          { ticket: { householdId } },
+          { event: { householdId } },
           {
             ticketId: null,
             eventId: null,
             OR: [
-              { householdId: user.householdId },
+              { householdId },
               { userId: user.id },
             ],
           },
@@ -185,7 +187,7 @@ export async function dispatchDailyDigestForUser(
     }),
     prisma.medication.findMany({
       where: {
-        householdId: user.householdId,
+        householdId,
         userId: user.id,
         active: true,
       },
@@ -329,19 +331,17 @@ export async function dispatchDailyDigestForUser(
     return { sent: false, error: mail.error || "Email send failed", items: totalItems, dayKey };
   }
 
-  if (!options.force) {
-    await prisma.alertDelivery.upsert({
-      where: {
-        userId_alertKey_channel: {
-          userId: user.id,
-          alertKey,
-          channel: "email",
-        },
+  await prisma.alertDelivery.upsert({
+    where: {
+      userId_alertKey_channel: {
+        userId: user.id,
+        alertKey,
+        channel: "email",
       },
-      create: { userId: user.id, alertKey, channel: "email" },
-      update: {},
-    });
-  }
+    },
+    create: { userId: user.id, alertKey, channel: "email" },
+    update: {},
+  });
 
   return { sent: true, items: totalItems, dayKey };
 }
