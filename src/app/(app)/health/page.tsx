@@ -15,6 +15,7 @@ import {
   TrendingDown,
   Minus,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 
 interface FitnessData {
   date: string;
@@ -349,7 +350,7 @@ export default function HealthPage() {
 }
 
 interface StatCardProps {
-  icon: any;
+  icon: LucideIcon;
   title: string;
   value: string;
   unit: string;

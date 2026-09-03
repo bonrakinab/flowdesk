@@ -14,6 +14,36 @@ type Connection = {
 
 type CivilDate = { year: number; month: number; day: number };
 
+type Numeric = number | string;
+
+type ActiveMinutesRollup = { activeMinutesSum?: Numeric };
+
+/** Only the fields this route reads out of a Google Health rollup point. */
+type RollupDataPoint = {
+  civilStartTime?: { date?: CivilDate };
+  steps?: { countSum?: Numeric };
+  distance?: { millimetersSum?: Numeric };
+  totalCalories?: { kcalSum?: Numeric };
+  activeMinutes?: {
+    activeMinutesRollupByActivityLevel?: ActiveMinutesRollup[];
+  };
+  heartRate?: {
+    beatsPerMinuteAvg?: Numeric;
+    beatsPerMinuteMin?: Numeric;
+    beatsPerMinuteMax?: Numeric;
+  };
+};
+
+type RollupPayload = { rollupDataPoints?: RollupDataPoint[] };
+
+type SleepDataPoint = {
+  sleep?: {
+    metadata?: { nap?: boolean };
+    interval?: { civilEndTime?: { date?: CivilDate }; endTime?: string };
+    summary?: { minutesAsleep?: Numeric };
+  };
+};
+
 type DailyMetric = {
   date: Date;
   steps: number | null;
@@ -187,13 +217,13 @@ async function fetchSleep(
     pages += 1;
   } while (pageToken && pages < 10);
 
-  return all as Array<Record<string, any>>;
+  return all as SleepDataPoint[];
 }
 
 function applyRollups(
   days: Map<string, DailyMetric>,
   dataType: string,
-  payload: any
+  payload: RollupPayload
 ) {
   for (const point of payload?.rollupDataPoints || []) {
     const key = civilKey(point.civilStartTime?.date);
@@ -209,7 +239,8 @@ function applyRollups(
       day.calories = Number(point.totalCalories.kcalSum || 0);
     } else if (dataType === "active-minutes" && point.activeMinutes) {
       day.activeMinutes = (point.activeMinutes.activeMinutesRollupByActivityLevel || []).reduce(
-        (sum: number, item: any) => sum + Number(item.activeMinutesSum || 0),
+        (sum: number, item: ActiveMinutesRollup) =>
+          sum + Number(item.activeMinutesSum || 0),
         0
       );
     } else if (dataType === "heart-rate" && point.heartRate) {
@@ -220,7 +251,7 @@ function applyRollups(
   }
 }
 
-function applySleep(days: Map<string, DailyMetric>, points: Array<Record<string, any>>) {
+function applySleep(days: Map<string, DailyMetric>, points: SleepDataPoint[]) {
   for (const point of points) {
     const sleep = point.sleep;
     if (!sleep || sleep.metadata?.nap) continue;
@@ -357,7 +388,7 @@ export async function POST() {
     const sleepResult = results[rollupTypes.length];
     if (sleepResult.status === "fulfilled") {
       accessibleSources += 1;
-      applySleep(days, sleepResult.value as Array<Record<string, any>>);
+      applySleep(days, sleepResult.value as SleepDataPoint[]);
     }
 
     if (accessibleSources === 0) {
