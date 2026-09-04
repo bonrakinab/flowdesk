@@ -1,0 +1,41 @@
+name: Diagnose Health Route
+
+on:
+  push:
+    branches:
+      - diag/health-route-build
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://user:pass@127.0.0.1:5432/flowdesk
+      DATABASE_URL_UNPOOLED: postgresql://user:pass@127.0.0.1:5432/flowdesk
+      AUTH_SECRET: diagnostic-secret-only-not-production
+      AUTH_TRUST_HOST: "true"
+      DISABLE_SERWIST: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+      - name: Build Next app
+        run: npx next build
+      - name: Assert Health route exists in build manifest
+        run: |
+          node - <<'NODE'
+          const fs = require('fs');
+          const path = '.next/server/app-paths-manifest.json';
+          const manifest = JSON.parse(fs.readFileSync(path, 'utf8'));
+          const matches = Object.entries(manifest).filter(([k,v]) => k.includes('/health') || String(v).includes('/health'));
+          console.log('HEALTH_ROUTE_MATCHES=', JSON.stringify(matches, null, 2));
+          if (!matches.length) {
+            console.error('HEALTH_ROUTE_MISSING_FROM_BUILD_MANIFEST');
+            process.exit(1);
+          }
+          NODE
+      - name: Show generated Health artifacts
+        run: find .next/server/app -path '*health*' -print | sort
