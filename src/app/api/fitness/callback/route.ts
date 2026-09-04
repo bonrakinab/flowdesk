@@ -13,11 +13,7 @@ function getGoogleOAuthCredentials() {
 }
 
 function getAppUrl(req: NextRequest) {
-  return (
-    process.env.NEXTAUTH_URL ||
-    process.env.AUTH_URL ||
-    req.nextUrl.origin
-  ).replace(/\/$/, "");
+  return req.nextUrl.origin.replace(/\/$/, "");
 }
 
 function redirectWithClearedState(req: NextRequest, suffix: string) {

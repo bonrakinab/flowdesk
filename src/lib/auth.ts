@@ -126,6 +126,23 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   },
   callbacks: {
     ...authConfig.callbacks,
+    async redirect({ url, baseUrl }) {
+      if (url.startsWith("/")) return `${baseUrl}${url}`;
+
+      try {
+        const target = new URL(url);
+        const allowedOrigins = new Set([
+          new URL(baseUrl).origin,
+          "https://flowdesk-banik.vercel.app",
+          "https://flowdesk-rose.vercel.app",
+        ]);
+        if (allowedOrigins.has(target.origin)) return target.toString();
+      } catch {
+        // Fall back to the configured Auth.js base URL below.
+      }
+
+      return baseUrl;
+    },
     async jwt({ token, user, account, trigger, session }) {
       if (user) token.sub = user.id;
 
