@@ -35,6 +35,11 @@ function LoginForm() {
     process.env.NEXT_PUBLIC_GOOGLE_ENABLED === "true" ||
     process.env.NEXT_PUBLIC_GOOGLE_ENABLED === "1";
 
+  function callbackTarget() {
+    const path = params.get("callbackUrl") || "/today";
+    return `${window.location.origin}${path.startsWith("/") ? path : "/today"}`;
+  }
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setLoading(true);
@@ -107,7 +112,7 @@ function LoginForm() {
           variant="secondary"
           size="lg"
           className="w-full"
-          onClick={() => signIn("google", { callbackUrl: "/today" })}
+          onClick={() => signIn("google", { callbackUrl: callbackTarget() })}
         >
           Continue with Google
         </Button>
