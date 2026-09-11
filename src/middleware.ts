@@ -4,9 +4,29 @@ import { NextResponse } from "next/server";
 
 const { auth } = NextAuth(authConfig);
 
+function requestOrigin(req: {
+  headers: Headers;
+  nextUrl: { origin: string; protocol: string };
+}) {
+  const forwardedHost = req.headers
+    .get("x-forwarded-host")
+    ?.split(",")[0]
+    ?.trim();
+  const host = forwardedHost || req.headers.get("host");
+  const forwardedProto = req.headers
+    .get("x-forwarded-proto")
+    ?.split(",")[0]
+    ?.trim();
+  const protocol =
+    forwardedProto || req.nextUrl.protocol.replace(":", "") || "https";
+
+  return host ? `${protocol}://${host}` : req.nextUrl.origin;
+}
+
 export default auth((req) => {
   const { pathname } = req.nextUrl;
   const isLoggedIn = !!req.auth;
+  const origin = requestOrigin(req);
 
   if (
     isLoggedIn &&
@@ -16,7 +36,7 @@ export default auth((req) => {
       pathname === "/reset-password" ||
       pathname === "/")
   ) {
-    return NextResponse.redirect(new URL("/today", req.nextUrl.origin));
+    return NextResponse.redirect(new URL("/today", origin));
   }
 
   const isPublicApi =
@@ -39,7 +59,7 @@ export default auth((req) => {
     if (pathname.startsWith("/api/")) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
-    const url = new URL("/login", req.nextUrl.origin);
+    const url = new URL("/login", origin);
     url.searchParams.set("callbackUrl", pathname);
     return NextResponse.redirect(url);
   }
