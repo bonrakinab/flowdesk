@@ -1,4 +1,5 @@
 import type { NextAuthConfig } from "next-auth";
+import { NextResponse } from "next/server";
 
 export const authConfig = {
   trustHost: true,
@@ -16,17 +17,37 @@ export const authConfig = {
       const isPublic =
         pathname.startsWith("/login") ||
         pathname.startsWith("/signup") ||
+        pathname.startsWith("/forgot-password") ||
+        pathname.startsWith("/reset-password") ||
         pathname.startsWith("/api/auth") ||
         pathname.startsWith("/api/signup") ||
         pathname.startsWith("/api/weather") ||
-        pathname.startsWith("/api/push/vapid");
+        pathname.startsWith("/api/wallpaper") ||
+        pathname.startsWith("/api/push/vapid") ||
+        pathname.startsWith("/api/cron/");
 
       if (pathname.startsWith("/api/") && !isPublic) {
         return isLoggedIn;
       }
 
       if (!isLoggedIn && !isPublic && pathname !== "/") {
-        return false;
+        const forwardedHost = request.headers
+          .get("x-forwarded-host")
+          ?.split(",")[0]
+          ?.trim();
+        const host = forwardedHost || request.headers.get("host");
+        const forwardedProto = request.headers
+          .get("x-forwarded-proto")
+          ?.split(",")[0]
+          ?.trim();
+        const protocol =
+          forwardedProto || request.nextUrl.protocol.replace(":", "") || "https";
+        const origin = host
+          ? `${protocol}://${host}`
+          : request.nextUrl.origin;
+        const url = new URL("/login", origin);
+        url.searchParams.set("callbackUrl", pathname);
+        return NextResponse.redirect(url);
       }
 
       return true;
