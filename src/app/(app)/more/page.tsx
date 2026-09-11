@@ -14,11 +14,13 @@ import {
   Wallet,
   Feather,
   Activity,
+  Dumbbell,
 } from "lucide-react";
 
 const links = [
   { href: "/agent", label: "Agent", icon: Bot, desc: "Chat to plan tickets, events & more" },
   { href: "/health", label: "Health", icon: Activity, desc: "Google Health activity, heart rate & sleep" },
+  { href: "/fitness-plan", label: "Fitness Plan", icon: Dumbbell, desc: "12-week workouts, Bengali diet & progress tracking" },
   { href: "/inbox", label: "Inbox", icon: Inbox, desc: "Capture & triage tasks" },
   { href: "/list", label: "List", icon: List, desc: "Dense ticket table" },
   { href: "/poems", label: "Poems", icon: Feather, desc: "Write, doodle & dictionary" },
