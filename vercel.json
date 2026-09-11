@@ -1,5 +1,10 @@
 {
+  "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "npm run vercel-build",
+  "alias": [
+    "flowdesk-rose.vercel.app",
+    "flowdesk-banik.vercel.app"
+  ],
   "crons": [
     {
       "path": "/api/cron/alerts",
