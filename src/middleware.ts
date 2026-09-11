@@ -2,7 +2,19 @@ import NextAuth from "next-auth";
 import { authConfig } from "@/lib/auth.config";
 import { NextResponse } from "next/server";
 
-const { auth } = NextAuth(authConfig);
+// Let this middleware own the unauthenticated redirect so we can preserve the
+// hostname the user actually opened. Auth.js' default authorized=false redirect
+// uses AUTH_URL as its base, which was sending rose-domain requests to the old
+// banik domain before this callback could run.
+const { auth } = NextAuth({
+  ...authConfig,
+  callbacks: {
+    ...authConfig.callbacks,
+    authorized() {
+      return true;
+    },
+  },
+});
 
 export default auth((req) => {
   const { pathname } = req.nextUrl;
